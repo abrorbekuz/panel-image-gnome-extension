@@ -1,0 +1,151 @@
+// prefs.js
+import Adw from 'gi://Adw';
+import Gtk from 'gi://Gtk';
+import Gio from 'gi://Gio';
+import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+
+export default class ImageQuickSettingsPreferences extends ExtensionPreferences {
+    fillPreferencesWindow(window) {
+        const settings = this.getSettings();
+        
+        // Create a preferences page
+        const page = new Adw.PreferencesPage();
+        window.add(page);
+        
+        // Layout group
+        const layoutGroup = new Adw.PreferencesGroup({
+            title: 'Layout Settings',
+            description: 'Configure how the image is displayed',
+        });
+        page.add(layoutGroup);
+        
+        // Detached mode switch
+        const detachedRow = new Adw.SwitchRow({
+            title: 'Detached Mode',
+        });
+        settings.bind('detached', detachedRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        layoutGroup.add(detachedRow);
+        
+        // Position row
+        const positionRow = new Adw.ComboRow({
+            title: 'Position',
+        });
+        const positionModel = new Gtk.StringList();
+        positionModel.append('Top');
+        positionModel.append('Bottom');
+        positionRow.set_model(positionModel);
+        
+        if (settings.get_string('position') === 'top') {
+            positionRow.set_selected(0);
+        } else {
+            positionRow.set_selected(1);
+        }
+        
+        positionRow.connect('notify::selected', () => {
+            settings.set_string('position', positionRow.get_selected() === 0 ? 'top' : 'bottom');
+        });
+        
+        layoutGroup.add(positionRow);
+        
+        // Gap row
+        const gapRow = new Adw.SpinRow({
+            title: 'Gap Size',
+            adjustment: new Gtk.Adjustment({
+                lower: 0,
+                upper: 50,
+                step_increment: 1,
+                page_increment: 5,
+            }),
+        });
+        settings.bind('gap', gapRow, 'value', Gio.SettingsBindFlags.DEFAULT);
+        layoutGroup.add(gapRow);
+        
+        // Image settings group
+        const imageGroup = new Adw.PreferencesGroup({
+            title: 'Image Settings',
+            description: 'Configure the image banner displayed at the top of Quick Settings',
+        });
+        page.add(imageGroup);
+        
+        // Image path
+        const imagePathRow = new Adw.EntryRow({
+            title: 'Image Path',
+        });
+        settings.bind('image-path', imagePathRow, 'text', Gio.SettingsBindFlags.DEFAULT);
+        imageGroup.add(imagePathRow);
+        
+        // Hover images section
+        const hoverEnabledRow = new Adw.SwitchRow({
+            title: 'Enable Hover Images',
+        });
+        settings.bind('hover-images-enabled', hoverEnabledRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        imageGroup.add(hoverEnabledRow);
+        
+        const hoverImagesRow = new Adw.EntryRow({
+            title: 'Hover Images Paths',
+        });
+        settings.bind('hover-images', hoverImagesRow, 'text', Gio.SettingsBindFlags.DEFAULT);
+        imageGroup.add(hoverImagesRow);
+        
+        const hoverInfoRow = new Adw.ActionRow({
+            title: 'Comma-separated paths: /path/1.png,/path/2.png,/path/3.png',
+        });
+        imageGroup.add(hoverInfoRow);
+        
+        // Image width
+        const widthRow = new Adw.SpinRow({
+            title: 'Image Width',
+            adjustment: new Gtk.Adjustment({
+                lower: -1,
+                upper: 1024,
+                step_increment: 1,
+                page_increment: 10,
+            }),
+        });
+        settings.bind('image-width', widthRow, 'value', Gio.SettingsBindFlags.DEFAULT);
+        imageGroup.add(widthRow);
+        
+        const widthInfo = new Adw.ActionRow({
+            title: 'Use -1 for full Quick Settings width',
+        });
+        imageGroup.add(widthInfo);
+        
+        // Image height
+        const heightRow = new Adw.SpinRow({
+            title: 'Banner Height',
+            adjustment: new Gtk.Adjustment({
+                lower: 0,
+                upper: 512,
+                step_increment: 1,
+                page_increment: 10,
+            }),
+        });
+        settings.bind('image-height', heightRow, 'value', Gio.SettingsBindFlags.DEFAULT);
+        imageGroup.add(heightRow);
+        
+        const heightInfo = new Adw.ActionRow({
+            title: 'Use 0 for auto height',
+        });
+        imageGroup.add(heightInfo);
+        
+        // Script settings group
+        const scriptGroup = new Adw.PreferencesGroup({
+            title: 'Script Settings',
+            description: 'Execute a script when image is clicked',
+        });
+        page.add(scriptGroup);
+        
+        // Script path
+        const scriptPathRow = new Adw.EntryRow({
+            title: 'Script Path',
+        });
+        settings.bind('script-path', scriptPathRow, 'text', Gio.SettingsBindFlags.DEFAULT);
+        scriptGroup.add(scriptPathRow);
+        
+        // Info row
+        const infoRow = new Adw.ActionRow({
+            title: 'Example: /home/user/script.sh',
+        });
+        scriptGroup.add(infoRow);
+    }
+}

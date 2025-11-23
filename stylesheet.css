@@ -1,0 +1,40 @@
+.image-banner {
+    background-color: transparent;
+    border-radius: 0;
+    padding: 0;
+    margin: 0;
+    border: none;
+}
+
+.image-banner:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.image-banner:active {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Detached mode: separate component styling */
+.image-banner-detached {
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    
+    border-radius: 16px;
+    padding: 2px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.image-banner-detached:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.image-banner-detached:active {
+    background-color: rgba(203, 10, 10, 0.12);
+}
+
+.image-placeholder {
+    font-size: 10pt;
+    color: #999;
+    padding: 20px;
+}
