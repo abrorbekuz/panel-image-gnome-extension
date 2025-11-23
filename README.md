@@ -16,9 +16,9 @@ Available on gnome EGO:
 # Screenshots
 
 <p style="display: flex; flex-wrap: wrap; gap: 10px;">
-    <img src="assets/detached-bottom.png" width="200px">
-    <img src="assets/detached-top.png" width="200px">
-    <img src="assets/default-top.png" width="200px">
+    <img src="assets/detached-bottom.png" width="250px">
+    <img src="assets/detached-top.png" width="250px">
+    <img src="assets/default-top.png" width="250px">
 </p>
 
 <img src="assets/settings.png">
