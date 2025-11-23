@@ -4,7 +4,7 @@ Adds top image to the top panel to execute your favourite app, it even has hover
 
 Available on gnome EGO:
 
-[<img src="assets/get-it-on-ego.svg" height="100">](https://extensions.gnome.org/extension/null/panel-image/)
+[<img src="assets/get-it-on-ego.svg" height="100">](https://extensions.gnome.org/extension/8900/panel-image/)
 
 # Changelog
 
