@@ -5,6 +5,7 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Clutter from "gi://Clutter";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
+import * as PanelMenu from "resource:///org/gnome/shell/ui/panelMenu.js";
 import { Extension } from "resource:///org/gnome/shell/extensions/extension.js";
 
 // Get Quick Settings elements
@@ -24,7 +25,7 @@ function getQuickSettings() {
 // Image banner widget
 const ImageBanner = GObject.registerClass(
   class ImageBanner extends St.Button {
-    _init(settings, extensionPath) {
+    _init(settings, extensionPath, standalone = false) {
       super._init({
         style_class: "image-banner",
         can_focus: true,
@@ -33,6 +34,7 @@ const ImageBanner = GObject.registerClass(
       });
 
       this._settings = settings;
+      this._standalone = standalone;
       this._extensionPath = extensionPath;
       this._currentImageIndex = 0;
       this._hoverImages = [];
@@ -61,6 +63,34 @@ const ImageBanner = GObject.registerClass(
         this._updateImage();
         this._setupHoverEffect();
       });
+    }
+
+    _buildStyle(imagePath) {
+      const height = this._settings.get_int("image-height");
+      let width = this._settings.get_int("image-width");
+      const radius = this._settings.get_boolean("rounded-corners") ? 16 : 0;
+
+      if (this._standalone) {
+        // -1 (or too big) = screen width. CSS px are scaled by the shell,
+        // so divide the monitor width by the scale factor.
+        const monitor = Main.layoutManager.primaryMonitor;
+        const sf = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const screenW = Math.floor(monitor.width / sf);
+        width = width > 0 ? Math.min(width, screenW) : screenW;
+      }
+
+      this._container.x_align =
+        width > 0 ? Clutter.ActorAlign.CENTER : Clutter.ActorAlign.FILL;
+
+      return `
+        background-image: url("${imagePath}");
+        background-size: 100% 100%;
+        background-repeat: no-repeat;
+        background-position: center;
+        border-radius: ${radius}px;
+        min-height: ${height > 0 ? height : 100}px;
+        width: ${width > 0 ? width + "px" : "100%"};
+      `;
     }
 
     _setupHoverEffect() {
@@ -128,7 +158,7 @@ const ImageBanner = GObject.registerClass(
       const imageIndex = Math.floor(relativeX * this._hoverImages.length);
       const clampedIndex = Math.max(
         0,
-        Math.min(imageIndex, this._hoverImages.length - 1)
+        Math.min(imageIndex, this._hoverImages.length - 1),
       );
 
       // Only update if changed
@@ -144,20 +174,8 @@ const ImageBanner = GObject.registerClass(
       const file = Gio.File.new_for_path(imagePath);
 
       if (file.query_exists(null)) {
-        const height = this._settings.get_int("image-height");
-        const heightStyle =
-          height > 0 ? `min-height: ${height}px;` : "min-height: 100px;";
-
         this._container.child = null;
-        this._container.style = `
-                background-image: url("${imagePath}");
-                background-size: 100% 100%;
-                border-radius: 16px;
-                background-repeat: no-repeat;
-                background-position: center;
-                ${heightStyle}
-                width: 100%;
-            `;
+        this._container.style = this._buildStyle(imagePath);
       }
     }
 
@@ -165,25 +183,12 @@ const ImageBanner = GObject.registerClass(
       const imagePath =
         this._settings.get_string("image-path") ||
         `${this._extensionPath}/assets/get-it-on-ego.svg`;
-      const height = this._settings.get_int("image-height");
 
       const file = Gio.File.new_for_path(imagePath);
 
       if (file.query_exists(null)) {
         this._container.child = null;
-
-        const heightStyle =
-          height > 0 ? `min-height: ${height}px;` : "min-height: 100px;";
-
-        this._container.style = `
-            background-image: url("${imagePath}");
-            background-size: 100% 100%;
-            border-radius: 16px;
-            background-repeat: no-repeat;
-            background-position: center;
-            ${heightStyle}
-            width: 100%;
-        `;
+        this._container.style = this._buildStyle(imagePath);
       } else {
         this._container.style = "";
         const label = new St.Label({
@@ -222,7 +227,7 @@ const ImageBanner = GObject.registerClass(
       }
       super.destroy();
     }
-  }
+  },
 );
 
 // Main extension class
@@ -232,19 +237,45 @@ export default class ImageQuickSettingsExtension extends Extension {
 
     getQuickSettings();
 
+    this._origBoxStyle = QuickSettingsBox.style;
     this._addBanner();
+    this._applyWidth();
+    this._addStandalone();
 
     // Listen for settings changes
     this._settingsChangedIds = [
-      this._settings.connect("changed::detached", () => this._reload()),
-      this._settings.connect("changed::position", () => this._reload()),
+      this._settings.connect("changed::rounded-corners", () => this._reload()),
+      this._settings.connect("changed::quick-settings-width", () =>
+        this._applyWidth(),
+      ),
+      this._settings.connect("changed::position", () => {
+        this._reload();
+        this._applyWidth();
+        this._addStandalone();
+      }),
       this._settings.connect("changed::gap", () => this._reload()),
+      this._settings.connect("changed::panel-button-icon", () =>
+        this._addStandalone(),
+      ),
+      this._settings.connect("changed::panel-button-position", () =>
+        this._addStandalone(),
+      ),
     ];
   }
 
+  _applyWidth() {
+    const standalone = this._settings.get_string("position") === "standalone";
+    const w = standalone ? 0 : this._settings.get_int("quick-settings-width");
+    QuickSettingsBox.style = w > 0 ? `width: ${w}px;` : this._origBoxStyle;
+  }
+
   _addBanner() {
-    const detached = this._settings.get_boolean("detached");
-    const position = this._settings.get_string("position");
+    // position values: top, bottom, top-detached, bottom-detached, standalone
+    const mode = this._settings.get_string("position");
+    if (mode === "standalone") return;
+
+    const detached = mode.endsWith("-detached");
+    const position = mode.startsWith("bottom") ? "bottom" : "top";
     const gap = this._settings.get_int("gap");
 
     // Create banner
@@ -292,6 +323,9 @@ export default class ImageQuickSettingsExtension extends Extension {
         this._banner.style = `margin-top: ${gap}px;`;
       }
     }
+
+    if (detached && !this._settings.get_boolean("rounded-corners"))
+      this._banner.style += " border-radius: 0;";
   }
 
   _reload() {
@@ -329,12 +363,100 @@ export default class ImageQuickSettingsExtension extends Extension {
     }
   }
 
+  // ---- Standalone mode: panel button that opens the image on its own ----
+
+  _addStandalone() {
+    this._removeStandalone();
+    if (this._settings.get_string("position") !== "standalone") return;
+
+    const button = new PanelMenu.Button(0.0, "Panel Image Button", true);
+    const iconStr = this._settings.get_string("panel-button-icon");
+    const icon = new St.Icon({ style_class: "system-status-icon" });
+    if (iconStr.startsWith("/")) icon.gicon = Gio.icon_new_for_string(iconStr);
+    else icon.icon_name = iconStr || "image-x-generic-symbolic";
+    button.add_child(icon);
+
+    // PanelMenu.Button overrides the event vfunc, so hook "event" directly
+    button.connect("event", (_actor, event) => {
+      const type = event.type();
+      if (
+        type === Clutter.EventType.BUTTON_PRESS ||
+        type === Clutter.EventType.TOUCH_BEGIN
+      ) {
+        this._toggleFloating();
+        return Clutter.EVENT_STOP;
+      }
+      return Clutter.EVENT_PROPAGATE;
+    });
+
+    const side = this._settings.get_string("panel-button-position");
+    Main.panel.addToStatusArea(`${this.uuid}-button`, button, 0, side);
+    this._panelButton = button;
+
+    this._floating = new ImageBanner(this._settings, this.path, true);
+    this._floating.hide();
+    this._floating.connect("clicked", () => this._closeFloating());
+    Main.layoutManager.addTopChrome(this._floating);
+  }
+
+  _toggleFloating() {
+    if (!this._floating) return;
+
+    if (this._floating.visible) {
+      this._closeFloating();
+      return;
+    }
+
+    const monitor = Main.layoutManager.primaryMonitor;
+    this._floating.show();
+    const [, w] = this._floating.get_preferred_width(-1);
+    const [bx] = this._panelButton.get_transformed_position();
+    const x = Math.max(monitor.x, Math.min(bx, monitor.x + monitor.width - w));
+    this._floating.set_position(x, monitor.y + Main.panel.height);
+
+    // Close on any click outside the image / panel button
+    this._outsideId = global.stage.connect("captured-event", (_a, event) => {
+      if (event.type() !== Clutter.EventType.BUTTON_PRESS)
+        return Clutter.EVENT_PROPAGATE;
+      const src = event.get_source();
+      if (
+        src &&
+        !this._floating.contains(src) &&
+        !this._panelButton.contains(src)
+      )
+        this._closeFloating();
+      return Clutter.EVENT_PROPAGATE;
+    });
+  }
+
+  _closeFloating() {
+    if (this._outsideId) {
+      global.stage.disconnect(this._outsideId);
+      this._outsideId = null;
+    }
+    if (this._floating) this._floating.hide();
+  }
+
+  _removeStandalone() {
+    this._closeFloating();
+    if (this._floating) {
+      Main.layoutManager.removeChrome(this._floating);
+      this._floating.destroy();
+      this._floating = null;
+    }
+    if (this._panelButton) {
+      this._panelButton.destroy();
+      this._panelButton = null;
+    }
+  }
+
   disable() {
     if (this._settingsChangedIds) {
       this._settingsChangedIds.forEach((id) => this._settings.disconnect(id));
       this._settingsChangedIds = null;
     }
-
+    QuickSettingsBox.style = this._origBoxStyle;
+    this._removeStandalone();
     this._removeBanner();
     this._settings = null;
   }

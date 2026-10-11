@@ -1,67 +1,106 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8" ?>
 <schemalist>
-  <schema id="org.gnome.shell.extensions.panel-image" path="/org/gnome/shell/extensions/panel-image/">
-    
-    <key name="detached" type="b">
-      <default>false</default>
-      <summary>Detached mode</summary>
-      <description>If true, shows as separate component with gap. If false, integrates directly into Quick Settings.</description>
-    </key>
-    
+  <schema
+        id="org.gnome.shell.extensions.panel-image"
+        path="/org/gnome/shell/extensions/panel-image/"
+    >
+
     <key name="position" type="s">
       <choices>
-        <choice value="top"/>
-        <choice value="bottom"/>
+        <choice value="top" />
+        <choice value="bottom" />
+        <choice value="top-detached" />
+        <choice value="bottom-detached" />
+        <choice value="standalone" />
       </choices>
       <default>"top"</default>
-      <summary>Position</summary>
-      <description>Position of the image banner (top or bottom of Quick Settings)</description>
+      <summary>Mode</summary>
+      <description
+            >Banner in Quick Settings (top/bottom, attached or detached), or standalone panel button that opens the image on its own</description>
     </key>
-    
+
     <key name="gap" type="i">
       <default>8</default>
-      <range min="0" max="50"/>
+      <range min="0" max="50" />
       <summary>Gap size</summary>
       <description>Gap in pixels when in detached mode</description>
     </key>
-    
+
+    <key name="rounded-corners" type="b">
+      <default>true</default>
+      <summary>Rounded corners</summary>
+      <description
+            >Round the corners of the image (and the detached frame)</description>
+    </key>
+
+    <key name="quick-settings-width" type="i">
+      <default>0</default>
+      <range min="0" max="1200" />
+      <summary>Quick Settings width</summary>
+      <description
+            >Width of the Quick Settings menu in pixels (0 = default)</description>
+    </key>
+
     <key name="image-path" type="s">
       <default>""</default>
       <summary>Image path</summary>
       <description>Full path to the image file to display</description>
     </key>
-    
+
     <key name="hover-images-enabled" type="b">
       <default>false</default>
       <summary>Enable hover images</summary>
-      <description>Enable multiple images that change on mouse hover</description>
+      <description
+            >Enable multiple images that change on mouse hover</description>
     </key>
-    
+
     <key name="hover-images" type="s">
       <default>""</default>
       <summary>Hover images paths</summary>
-      <description>Comma-separated list of image paths for hover effect</description>
+      <description
+            >Comma-separated list of image paths for hover effect</description>
     </key>
-    
+
     <key name="image-width" type="i">
       <default>-1</default>
-      <range min="-1" max="1024"/>
+      <range min="-1" max="8192" />
       <summary>Image width</summary>
-      <description>Width of the displayed image in pixels (-1 = full Quick Settings width)</description>
+      <description
+            >Width of the displayed image in pixels (-1 = full width: Quick Settings width, or screen width in standalone mode)</description>
     </key>
-    
+
     <key name="image-height" type="i">
       <default>100</default>
-      <range min="0" max="512"/>
+      <range min="0" max="4096" />
       <summary>Image height</summary>
-      <description>Height of the banner in pixels (0 = auto height based on image aspect ratio)</description>
+      <description>Height of the banner in pixels</description>
     </key>
-    
+
+    <key name="panel-button-icon" type="s">
+      <default>"image-x-generic-symbolic"</default>
+      <summary>Panel button icon</summary>
+      <description
+            >Icon name or full path to an image file (standalone mode)</description>
+    </key>
+
+    <key name="panel-button-position" type="s">
+      <choices>
+        <choice value="left" />
+        <choice value="center" />
+        <choice value="right" />
+      </choices>
+      <default>"right"</default>
+      <summary>Panel side</summary>
+      <description
+            >Which side of the top panel the standalone button goes to</description>
+    </key>
+
     <key name="script-path" type="s">
       <default>""</default>
       <summary>Script path</summary>
-      <description>Path to script that executes when image is clicked</description>
+      <description
+            >Path to script that executes when image is clicked</description>
     </key>
-    
+
   </schema>
 </schemalist>
