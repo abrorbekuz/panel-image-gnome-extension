@@ -2,24 +2,140 @@
 import Adw from "gi://Adw";
 import Gtk from "gi://Gtk";
 import Gio from "gi://Gio";
+import Gdk from "gi://Gdk";
+import GLib from "gi://GLib";
 import { ExtensionPreferences } from "resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js";
+
+const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif|tiff?)$/i;
 
 export default class ImageQuickSettingsPreferences extends ExtensionPreferences {
   fillPreferencesWindow(window) {
     const settings = this.getSettings();
+    window.set_default_size(580, 760);
 
-    // Create a preferences page
     const page = new Adw.PreferencesPage();
     window.add(page);
 
-    // Layout group
-    const layoutGroup = new Adw.PreferencesGroup({
-      title: "Layout Settings",
-      description: "Configure how the image is displayed",
-    });
-    page.add(layoutGroup);
+    // ---------- helpers ----------
 
-    // Mode row (replaces old Detached switch + Position)
+    const imageFilters = () => {
+      const filter = new Gtk.FileFilter({ name: "Images" });
+      filter.add_mime_type("image/*");
+      const store = new Gio.ListStore({ item_type: Gtk.FileFilter.$gtype });
+      store.append(filter);
+      return [store, filter];
+    };
+
+    // pick many images
+    const chooseImages = (onPick) => {
+      const dialog = new Gtk.FileDialog({
+        title: "Choose images",
+        modal: true,
+      });
+      const [store, filter] = imageFilters();
+      dialog.set_filters(store);
+      dialog.set_default_filter(filter);
+      dialog.open_multiple(window, null, (d, res) => {
+        try {
+          const files = d.open_multiple_finish(res);
+          const paths = [];
+          for (let i = 0; i < files.get_n_items(); i++)
+            paths.push(files.get_item(i).get_path());
+          onPick(paths);
+        } catch (_e) {
+          // cancelled
+        }
+      });
+    };
+
+    // pick one file (icon / script)
+    const chooseFile = (title, imagesOnly, onPick) => {
+      const dialog = new Gtk.FileDialog({ title, modal: true });
+      if (imagesOnly) {
+        const [store, filter] = imageFilters();
+        dialog.set_filters(store);
+        dialog.set_default_filter(filter);
+      }
+      dialog.open(window, null, (d, res) => {
+        try {
+          const file = d.open_finish(res);
+          if (file) onPick(file.get_path());
+        } catch (_e) {
+          // cancelled
+        }
+      });
+    };
+
+    const pickButton = (tooltip, onClick) => {
+      const btn = new Gtk.Button({
+        icon_name: "document-open-symbolic",
+        valign: Gtk.Align.CENTER,
+        tooltip_text: tooltip,
+        css_classes: ["flat"],
+      });
+      btn.connect("clicked", onClick);
+      return btn;
+    };
+
+    const spinRow = (title, subtitle, key, lower, upper, page_inc = 10) => {
+      const row = new Adw.SpinRow({
+        title,
+        subtitle,
+        adjustment: new Gtk.Adjustment({
+          lower,
+          upper,
+          step_increment: 1,
+          page_increment: page_inc,
+        }),
+      });
+      settings.bind(key, row, "value", Gio.SettingsBindFlags.DEFAULT);
+      return row;
+    };
+
+    // color picker with reset (empty = theme default)
+    const colorRow = (title, key) => {
+      const row = new Adw.ActionRow({ title });
+      const btn = new Gtk.ColorDialogButton({
+        dialog: new Gtk.ColorDialog({ with_alpha: true }),
+        valign: Gtk.Align.CENTER,
+      });
+      const reset = new Gtk.Button({
+        icon_name: "edit-clear-symbolic",
+        valign: Gtk.Align.CENTER,
+        tooltip_text: "Back to default",
+        css_classes: ["flat"],
+      });
+      let syncing = false;
+
+      const sync = () => {
+        const str = settings.get_string(key);
+        const rgba = new Gdk.RGBA();
+        if (!str || !rgba.parse(str)) rgba.parse("rgba(0,0,0,0)");
+        syncing = true;
+        btn.set_rgba(rgba);
+        syncing = false;
+        row.subtitle = str ? "" : "Default";
+        reset.sensitive = !!str;
+      };
+
+      btn.connect("notify::rgba", () => {
+        if (syncing) return;
+        settings.set_string(key, btn.get_rgba().to_string());
+      });
+      reset.connect("clicked", () => settings.set_string(key, ""));
+      settings.connect(`changed::${key}`, sync);
+      sync();
+
+      row.add_suffix(reset);
+      row.add_suffix(btn);
+      return row;
+    };
+
+    // ---------- Display ----------
+
+    const displayGroup = new Adw.PreferencesGroup({ title: "Display" });
+    page.add(displayGroup);
+
     const modes = [
       "top",
       "bottom",
@@ -29,6 +145,7 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
     ];
     const modeRow = new Adw.ComboRow({
       title: "Mode",
+      subtitle: "Standalone = own panel button, image opens by itself",
     });
     const modeModel = new Gtk.StringList();
     [
@@ -45,204 +162,256 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
     modeRow.connect("notify::selected", () => {
       settings.set_string("position", modes[modeRow.get_selected()]);
     });
-    layoutGroup.add(modeRow);
+    displayGroup.add(modeRow);
 
-    // Gap row
-    const gapRow = new Adw.SpinRow({
-      title: "Gap Size",
-      adjustment: new Gtk.Adjustment({
-        lower: 0,
-        upper: 50,
-        step_increment: 1,
-        page_increment: 5,
-      }),
+    const hoverRow = new Adw.SwitchRow({
+      title: "Hover gallery",
+      subtitle:
+        "Move the mouse across the image to switch images (needs 2+ images)",
     });
-    settings.bind("gap", gapRow, "value", Gio.SettingsBindFlags.DEFAULT);
-    layoutGroup.add(gapRow);
+    settings.bind(
+      "hover-images-enabled",
+      hoverRow,
+      "active",
+      Gio.SettingsBindFlags.DEFAULT,
+    );
+    displayGroup.add(hoverRow);
 
-    // Rounded corners
-    const roundedRow = new Adw.SwitchRow({
-      title: "Rounded Corners",
+    // ---------- Images (drag & drop) ----------
+
+    const imagesGroup = new Adw.PreferencesGroup({
+      title: "Images",
+      description:
+        "Drag & drop images anywhere in this window. Pick one as Default, the rest play on hover.",
     });
+    page.add(imagesGroup);
+
+    const addRow = new Adw.ActionRow({
+      title: "Add images",
+      subtitle: "Click here or drop files",
+    });
+    const addBtn = new Gtk.Button({
+      icon_name: "list-add-symbolic",
+      valign: Gtk.Align.CENTER,
+      css_classes: ["flat"],
+    });
+    addRow.add_suffix(addBtn);
+    addRow.activatable_widget = addBtn;
+    imagesGroup.add(addRow);
+
+    const addPaths = (paths) => {
+      const list = settings.get_strv("images");
+      let changed = false;
+      for (const p of paths) {
+        if (p && IMAGE_RE.test(p) && !list.includes(p)) {
+          list.push(p);
+          changed = true;
+        }
+      }
+      if (changed) settings.set_strv("images", list);
+    };
+
+    addBtn.connect("clicked", () => chooseImages(addPaths));
+
+    // drop target on the whole window
+    const drop = Gtk.DropTarget.new(Gdk.FileList.$gtype, Gdk.DragAction.COPY);
+    drop.connect("drop", (_target, value) => {
+      const files = value.get_files();
+      addPaths(files.map((f) => f.get_path()).filter((p) => p));
+      return true;
+    });
+    window.add_controller(drop);
+
+    let imageRows = [];
+    const rebuildImages = () => {
+      imageRows.forEach((r) => imagesGroup.remove(r));
+      imageRows = [];
+
+      const list = settings.get_strv("images");
+      const def = settings.get_string("default-image");
+      const defPath = list.includes(def) ? def : list[0];
+      let firstCheck = null;
+
+      list.forEach((path) => {
+        const exists = GLib.file_test(path, GLib.FileTest.EXISTS);
+        const row = new Adw.ActionRow({
+          title: GLib.path_get_basename(path),
+          subtitle: exists ? "" : "File missing",
+          tooltip_text: path,
+        });
+
+        if (exists) {
+          const pic = Gtk.Picture.new_for_filename(path);
+          pic.set_size_request(64, 40);
+          pic.content_fit = Gtk.ContentFit.COVER;
+          pic.valign = Gtk.Align.CENTER;
+          row.add_prefix(pic);
+        }
+
+        const check = new Gtk.CheckButton({
+          label: "Default",
+          valign: Gtk.Align.CENTER,
+          active: path === defPath,
+        });
+        if (firstCheck) check.set_group(firstCheck);
+        else firstCheck = check;
+        check.connect("toggled", () => {
+          if (check.active) settings.set_string("default-image", path);
+        });
+        row.add_suffix(check);
+
+        const del = new Gtk.Button({
+          icon_name: "user-trash-symbolic",
+          valign: Gtk.Align.CENTER,
+          tooltip_text: "Remove",
+          css_classes: ["flat"],
+        });
+        del.connect("clicked", () => {
+          if (settings.get_string("default-image") === path)
+            settings.set_string("default-image", "");
+          settings.set_strv(
+            "images",
+            settings.get_strv("images").filter((p) => p !== path),
+          );
+        });
+        row.add_suffix(del);
+
+        imagesGroup.add(row);
+        imageRows.push(row);
+      });
+    };
+    settings.connect("changed::images", rebuildImages);
+    rebuildImages();
+
+    // ---------- Collapsible options ----------
+
+    const moreGroup = new Adw.PreferencesGroup({ title: "Customize" });
+    page.add(moreGroup);
+
+    const expander = (title, subtitle) => {
+      const row = new Adw.ExpanderRow({ title, subtitle });
+      moreGroup.add(row);
+      return row;
+    };
+
+    // Size & shape
+    const shapeExp = expander("Size & Shape", "Width, height, corners");
+    shapeExp.add_row(
+      spinRow(
+        "Image width",
+        "-1 = full width (screen width in standalone)",
+        "image-width",
+        -1,
+        8192,
+      ),
+    );
+    shapeExp.add_row(
+      spinRow("Image height", "Pixels", "image-height", 0, 4096),
+    );
+    const roundedRow = new Adw.SwitchRow({ title: "Rounded corners" });
     settings.bind(
       "rounded-corners",
       roundedRow,
       "active",
       Gio.SettingsBindFlags.DEFAULT,
     );
-    layoutGroup.add(roundedRow);
+    shapeExp.add_row(roundedRow);
 
-    // Quick Settings width
-    const qsWidthRow = new Adw.SpinRow({
-      title: "Quick Settings Width",
-      subtitle: "0 = default (not used in standalone mode)",
-      adjustment: new Gtk.Adjustment({
-        lower: 0,
-        upper: 1200,
-        step_increment: 1,
-        page_increment: 10,
-      }),
-    });
-    settings.bind(
-      "quick-settings-width",
-      qsWidthRow,
-      "value",
-      Gio.SettingsBindFlags.DEFAULT,
+    // Colors
+    const colorExp = expander(
+      "Colors",
+      "Fill shows where the image is narrower than the banner",
     );
-    layoutGroup.add(qsWidthRow);
-
-    // Image settings group
-    const imageGroup = new Adw.PreferencesGroup({
-      title: "Image Settings",
-      description: "Configure the image banner",
-    });
-    page.add(imageGroup);
-
-    // Image path
-    const imagePathRow = new Adw.EntryRow({
-      title: "Image Path",
-    });
-    settings.bind(
-      "image-path",
-      imagePathRow,
-      "text",
-      Gio.SettingsBindFlags.DEFAULT,
+    colorExp.add_row(colorRow("Fill color", "fill-color"));
+    colorExp.add_row(colorRow("Border color", "border-color"));
+    colorExp.add_row(
+      spinRow("Border width", "0 = no border", "border-width", 0, 20, 2),
     );
-    imageGroup.add(imagePathRow);
 
-    // Hover images section
-    const hoverEnabledRow = new Adw.SwitchRow({
-      title: "Enable Hover Images",
-    });
-    settings.bind(
-      "hover-images-enabled",
-      hoverEnabledRow,
-      "active",
-      Gio.SettingsBindFlags.DEFAULT,
+    // Quick Settings
+    const qsExp = expander("Quick Settings", "Menu width and gap");
+    qsExp.add_row(
+      spinRow(
+        "Quick Settings width",
+        "0 = default",
+        "quick-settings-width",
+        0,
+        1200,
+      ),
     );
-    imageGroup.add(hoverEnabledRow);
-
-    const hoverImagesRow = new Adw.EntryRow({
-      title: "Hover Images Paths",
-    });
-    settings.bind(
-      "hover-images",
-      hoverImagesRow,
-      "text",
-      Gio.SettingsBindFlags.DEFAULT,
+    qsExp.add_row(
+      spinRow(
+        "Gap",
+        "Space between image and the toggles (detached)",
+        "gap",
+        0,
+        50,
+        5,
+      ),
     );
-    imageGroup.add(hoverImagesRow);
 
-    const hoverInfoRow = new Adw.ActionRow({
-      title: "Comma-separated paths: /path/1.png,/path/2.png,/path/3.png",
-    });
-    imageGroup.add(hoverInfoRow);
-
-    // Image width
-    const widthRow = new Adw.SpinRow({
-      title: "Image Width",
-      adjustment: new Gtk.Adjustment({
-        lower: -1,
-        upper: 8192,
-        step_increment: 1,
-        page_increment: 10,
-      }),
-    });
-    settings.bind(
-      "image-width",
-      widthRow,
-      "value",
-      Gio.SettingsBindFlags.DEFAULT,
-    );
-    imageGroup.add(widthRow);
-
-    const widthInfo = new Adw.ActionRow({
-      title: "Use -1 for full width (screen width in standalone mode)",
-    });
-    imageGroup.add(widthInfo);
-
-    // Image height
-    const heightRow = new Adw.SpinRow({
-      title: "Banner Height",
-      adjustment: new Gtk.Adjustment({
-        lower: 0,
-        upper: 4096,
-        step_increment: 1,
-        page_increment: 10,
-      }),
-    });
-    settings.bind(
-      "image-height",
-      heightRow,
-      "value",
-      Gio.SettingsBindFlags.DEFAULT,
-    );
-    imageGroup.add(heightRow);
-
-    const heightInfo = new Adw.ActionRow({
-      title: "Use 0 for auto height",
-    });
-    imageGroup.add(heightInfo);
-
-    // Panel button group (used in standalone mode)
-    const btnGroup = new Adw.PreferencesGroup({
-      title: "Panel Button",
-      description: "Used in standalone mode",
-    });
-    page.add(btnGroup);
-
-    const btnIconRow = new Adw.EntryRow({
-      title: "Icon (name or full path)",
-    });
+    // Panel button
+    const btnExp = expander("Panel Button", "Standalone mode only");
+    const iconRow = new Adw.EntryRow({ title: "Icon name or image" });
     settings.bind(
       "panel-button-icon",
-      btnIconRow,
+      iconRow,
       "text",
       Gio.SettingsBindFlags.DEFAULT,
     );
-    btnGroup.add(btnIconRow);
+    iconRow.add_suffix(
+      pickButton("Pick an image as icon", () =>
+        chooseFile("Choose icon", true, (p) =>
+          settings.set_string("panel-button-icon", p),
+        ),
+      ),
+    );
+    btnExp.add_row(iconRow);
 
     const sides = ["left", "center", "right"];
-    const btnPosRow = new Adw.ComboRow({
-      title: "Panel Side",
-    });
+    const sideRow = new Adw.ComboRow({ title: "Panel side" });
     const sideModel = new Gtk.StringList();
     ["Left", "Center", "Right"].forEach((s) => sideModel.append(s));
-    btnPosRow.set_model(sideModel);
-    btnPosRow.set_selected(
+    sideRow.set_model(sideModel);
+    sideRow.set_selected(
       Math.max(0, sides.indexOf(settings.get_string("panel-button-position"))),
     );
-    btnPosRow.connect("notify::selected", () => {
+    sideRow.connect("notify::selected", () => {
       settings.set_string(
         "panel-button-position",
-        sides[btnPosRow.get_selected()],
+        sides[sideRow.get_selected()],
       );
     });
-    btnGroup.add(btnPosRow);
+    btnExp.add_row(sideRow);
 
-    // Script settings group
-    const scriptGroup = new Adw.PreferencesGroup({
-      title: "Script Settings",
-      description: "Execute a script when image is clicked",
-    });
-    page.add(scriptGroup);
-
-    // Script path
-    const scriptPathRow = new Adw.EntryRow({
-      title: "Script Path",
-    });
+    // Click action
+    const scriptExp = expander(
+      "Click Action",
+      "Run a script when the image is clicked",
+    );
+    const scriptRow = new Adw.EntryRow({ title: "Script" });
     settings.bind(
       "script-path",
-      scriptPathRow,
+      scriptRow,
       "text",
       Gio.SettingsBindFlags.DEFAULT,
     );
-    scriptGroup.add(scriptPathRow);
+    scriptRow.add_suffix(
+      pickButton("Pick a script", () =>
+        chooseFile("Choose script", false, (p) =>
+          settings.set_string("script-path", p),
+        ),
+      ),
+    );
+    scriptExp.add_row(scriptRow);
 
-    // Info row
-    const infoRow = new Adw.ActionRow({
-      title: "Example: /home/user/script.sh",
-    });
-    scriptGroup.add(infoRow);
+    // grey out what does not apply to the current mode
+    const syncMode = () => {
+      const standalone = settings.get_string("position") === "standalone";
+      qsExp.sensitive = !standalone;
+      btnExp.sensitive = standalone;
+    };
+    settings.connect("changed::position", syncMode);
+    syncMode();
   }
 }

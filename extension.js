@@ -22,10 +22,14 @@ function getQuickSettings() {
   }
 }
 
+function cssUrl(path) {
+  return path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 // Image banner widget
 const ImageBanner = GObject.registerClass(
   class ImageBanner extends St.Button {
-    _init(settings, extensionPath, standalone = false) {
+    _init(settings, standalone = false) {
       super._init({
         style_class: "image-banner",
         can_focus: true,
@@ -35,11 +39,11 @@ const ImageBanner = GObject.registerClass(
 
       this._settings = settings;
       this._standalone = standalone;
-      this._extensionPath = extensionPath;
+      this._marginStyle = "";
       this._currentImageIndex = 0;
       this._hoverImages = [];
 
-      // Create container
+      // Create container (holds the image)
       this._container = new St.Bin({
         x_expand: true,
         x_align: Clutter.ActorAlign.FILL,
@@ -65,6 +69,36 @@ const ImageBanner = GObject.registerClass(
       });
     }
 
+    // Margin comes from the extension (gap), the rest from settings
+    setMargin(css) {
+      this._marginStyle = css;
+      this._applyFrameStyle();
+    }
+
+    // Outer frame: fill color, border, rounded corners
+    _applyFrameStyle() {
+      const radius = this._settings.get_boolean("rounded-corners") ? 16 : 0;
+      const fill = this._settings.get_string("fill-color");
+      const borderWidth = this._settings.get_int("border-width");
+      const borderColor =
+        this._settings.get_string("border-color") || "rgba(255,255,255,0.25)";
+
+      let css = `${this._marginStyle} border-radius: ${radius}px;`;
+      if (fill) css += ` background-color: ${fill};`;
+      if (borderWidth > 0)
+        css += ` border: ${borderWidth}px solid ${borderColor};`;
+      this.style = css;
+    }
+
+    // Images list: default image first, then the others
+    _getImages() {
+      const list = this._settings.get_strv("images").filter((p) => p);
+      if (list.length === 0) return [];
+      const def = this._settings.get_string("default-image");
+      const first = list.includes(def) ? def : list[0];
+      return [first, ...list.filter((p) => p !== first)];
+    }
+
     _buildStyle(imagePath) {
       const height = this._settings.get_int("image-height");
       let width = this._settings.get_int("image-width");
@@ -83,7 +117,7 @@ const ImageBanner = GObject.registerClass(
         width > 0 ? Clutter.ActorAlign.CENTER : Clutter.ActorAlign.FILL;
 
       return `
-        background-image: url("${imagePath}");
+        background-image: url("${cssUrl(imagePath)}");
         background-size: 100% 100%;
         background-repeat: no-repeat;
         background-position: center;
@@ -104,41 +138,25 @@ const ImageBanner = GObject.registerClass(
         this._leaveEventId = null;
       }
 
-      const hoverEnabled = this._settings.get_boolean("hover-images-enabled");
+      this._hoverImages = [];
 
-      if (hoverEnabled) {
-        const hoverImagesStr = this._settings.get_string("hover-images");
-        const mainImagePath =
-          this._settings.get_string("image-path") ||
-          `${this._extensionPath}/assets/get-it-on-ego.svg`;
+      if (!this._settings.get_boolean("hover-images-enabled")) return;
 
-        // Start with main image as first in queue
-        this._hoverImages = [mainImagePath];
+      const all = this._getImages();
+      if (all.length < 2) return;
 
-        if (hoverImagesStr) {
-          // Parse comma-separated paths and add them
-          const additionalImages = hoverImagesStr
-            .split(",")
-            .map((p) => p.trim())
-            .filter((p) => p.length > 0);
-          this._hoverImages = this._hoverImages.concat(additionalImages);
-        }
+      this._hoverImages = all;
 
-        if (this._hoverImages.length > 1) {
-          // Connect motion event for hover tracking
-          this._motionEventId = this.connect("motion-event", (actor, event) => {
-            return this._onMotionEvent(actor, event);
-          });
+      // Connect motion event for hover tracking
+      this._motionEventId = this.connect("motion-event", (actor, event) => {
+        return this._onMotionEvent(actor, event);
+      });
 
-          // Reset to original image on leave
-          this._leaveEventId = this.connect("leave-event", () => {
-            this._currentImageIndex = 0;
-            this._updateImage();
-          });
-        }
-      } else {
-        this._hoverImages = [];
-      }
+      // Reset to default image on leave
+      this._leaveEventId = this.connect("leave-event", () => {
+        this._currentImageIndex = 0;
+        this._updateImage();
+      });
     }
 
     _onMotionEvent(actor, event) {
@@ -180,9 +198,18 @@ const ImageBanner = GObject.registerClass(
     }
 
     _updateImage() {
-      const imagePath =
-        this._settings.get_string("image-path") ||
-        `${this._extensionPath}/assets/get-it-on-ego.svg`;
+      this._applyFrameStyle();
+
+      const imagePath = this._getImages()[0];
+
+      if (!imagePath) {
+        this._container.style = "";
+        this._container.child = new St.Label({
+          text: "No image. Add one in the extension preferences.",
+          style_class: "image-placeholder",
+        });
+        return;
+      }
 
       const file = Gio.File.new_for_path(imagePath);
 
@@ -191,11 +218,10 @@ const ImageBanner = GObject.registerClass(
         this._container.style = this._buildStyle(imagePath);
       } else {
         this._container.style = "";
-        const label = new St.Label({
+        this._container.child = new St.Label({
           text: "Image not found: " + imagePath,
           style_class: "image-placeholder",
         });
-        this._container.child = label;
       }
     }
 
@@ -243,8 +269,8 @@ export default class ImageQuickSettingsExtension extends Extension {
     this._addStandalone();
 
     // Listen for settings changes
+    // (image, colors, border, corners update live inside ImageBanner)
     this._settingsChangedIds = [
-      this._settings.connect("changed::rounded-corners", () => this._reload()),
       this._settings.connect("changed::quick-settings-width", () =>
         this._applyWidth(),
       ),
@@ -279,7 +305,7 @@ export default class ImageQuickSettingsExtension extends Extension {
     const gap = this._settings.get_int("gap");
 
     // Create banner
-    this._banner = new ImageBanner(this._settings, this.path);
+    this._banner = new ImageBanner(this._settings);
 
     // Store original style classes
     this._originalBoxStyle = QuickSettingsBox.style_class;
@@ -304,12 +330,12 @@ export default class ImageQuickSettingsExtension extends Extension {
           // Insert at the beginning
           QuickSettingsBox.insert_child_at_index(this._banner, 0);
           this._banner.style_class = "image-banner image-banner-detached";
-          this._banner.style = `margin-bottom: ${gap}px;`;
+          this._banner.setMargin(`margin-bottom: ${gap}px;`);
         } else {
           // Bottom: add banner after the grid
           QuickSettingsBox.add_child(this._banner);
           this._banner.style_class = "image-banner image-banner-detached";
-          this._banner.style = `margin-top: ${gap}px;`;
+          this._banner.setMargin(`margin-top: ${gap}px;`);
         }
       }
     } else {
@@ -317,15 +343,12 @@ export default class ImageQuickSettingsExtension extends Extension {
       // This places it as a real child in the vertical layout, not overlapping
       if (position === "top") {
         QuickSettingsBox.insert_child_at_index(this._banner, 0);
-        this._banner.style = `margin-bottom: ${gap}px;`;
+        this._banner.setMargin(`margin-bottom: ${gap}px;`);
       } else {
         QuickSettingsBox.add_child(this._banner);
-        this._banner.style = `margin-top: ${gap}px;`;
+        this._banner.setMargin(`margin-top: ${gap}px;`);
       }
     }
-
-    if (detached && !this._settings.get_boolean("rounded-corners"))
-      this._banner.style += " border-radius: 0;";
   }
 
   _reload() {
@@ -393,7 +416,7 @@ export default class ImageQuickSettingsExtension extends Extension {
     Main.panel.addToStatusArea(`${this.uuid}-button`, button, 0, side);
     this._panelButton = button;
 
-    this._floating = new ImageBanner(this._settings, this.path, true);
+    this._floating = new ImageBanner(this._settings, true);
     this._floating.hide();
     this._floating.connect("clicked", () => this._closeFloating());
     Main.layoutManager.addTopChrome(this._floating);

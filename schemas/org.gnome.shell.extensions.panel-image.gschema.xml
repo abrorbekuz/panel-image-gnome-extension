@@ -19,18 +19,76 @@
             >Banner in Quick Settings (top/bottom, attached or detached), or standalone panel button that opens the image on its own</description>
     </key>
 
-    <key name="gap" type="i">
-      <default>8</default>
-      <range min="0" max="50" />
-      <summary>Gap size</summary>
-      <description>Gap in pixels when in detached mode</description>
+    <key name="images" type="as">
+      <default>[]</default>
+      <summary>Images</summary>
+      <description
+            >Image file paths. One is the default image, the rest are shown on hover when hover gallery is on</description>
+    </key>
+
+    <key name="default-image" type="s">
+      <default>""</default>
+      <summary>Default image</summary>
+      <description
+            >Path of the default image. If empty or not in the list, the first image is used</description>
+    </key>
+
+    <key name="hover-images-enabled" type="b">
+      <default>false</default>
+      <summary>Hover gallery</summary>
+      <description
+            >Moving the mouse across the banner switches between the images</description>
+    </key>
+
+    <key name="image-width" type="i">
+      <default>-1</default>
+      <range min="-1" max="8192" />
+      <summary>Image width</summary>
+      <description
+            >Width of the image in pixels (-1 = full width: Quick Settings width, or screen width in standalone mode)</description>
+    </key>
+
+    <key name="image-height" type="i">
+      <default>100</default>
+      <range min="0" max="4096" />
+      <summary>Image height</summary>
+      <description>Height of the banner in pixels</description>
     </key>
 
     <key name="rounded-corners" type="b">
       <default>true</default>
       <summary>Rounded corners</summary>
       <description
-            >Round the corners of the image (and the detached frame)</description>
+            >Round the corners of the image and the banner frame</description>
+    </key>
+
+    <key name="fill-color" type="s">
+      <default>""</default>
+      <summary>Fill color</summary>
+      <description
+            >CSS color shown behind the image where it does not cover the banner. Empty = theme default</description>
+    </key>
+
+    <key name="border-color" type="s">
+      <default>""</default>
+      <summary>Border color</summary>
+      <description
+            >CSS color of the banner border. Empty = soft white</description>
+    </key>
+
+    <key name="border-width" type="i">
+      <default>0</default>
+      <range min="0" max="20" />
+      <summary>Border width</summary>
+      <description>Border thickness in pixels (0 = no border)</description>
+    </key>
+
+    <key name="gap" type="i">
+      <default>8</default>
+      <range min="0" max="50" />
+      <summary>Gap size</summary>
+      <description
+            >Gap in pixels between the banner and the Quick Settings grid</description>
     </key>
 
     <key name="quick-settings-width" type="i">
@@ -39,41 +97,6 @@
       <summary>Quick Settings width</summary>
       <description
             >Width of the Quick Settings menu in pixels (0 = default)</description>
-    </key>
-
-    <key name="image-path" type="s">
-      <default>""</default>
-      <summary>Image path</summary>
-      <description>Full path to the image file to display</description>
-    </key>
-
-    <key name="hover-images-enabled" type="b">
-      <default>false</default>
-      <summary>Enable hover images</summary>
-      <description
-            >Enable multiple images that change on mouse hover</description>
-    </key>
-
-    <key name="hover-images" type="s">
-      <default>""</default>
-      <summary>Hover images paths</summary>
-      <description
-            >Comma-separated list of image paths for hover effect</description>
-    </key>
-
-    <key name="image-width" type="i">
-      <default>-1</default>
-      <range min="-1" max="8192" />
-      <summary>Image width</summary>
-      <description
-            >Width of the displayed image in pixels (-1 = full width: Quick Settings width, or screen width in standalone mode)</description>
-    </key>
-
-    <key name="image-height" type="i">
-      <default>100</default>
-      <range min="0" max="4096" />
-      <summary>Image height</summary>
-      <description>Height of the banner in pixels</description>
     </key>
 
     <key name="panel-button-icon" type="s">
