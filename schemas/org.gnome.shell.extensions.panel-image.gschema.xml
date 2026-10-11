@@ -63,6 +63,17 @@
             >Corner radius in pixels for the image and the banner frame (0 = square)</description>
     </key>
 
+    <key name="fill-mode" type="s">
+      <choices>
+        <choice value="color" />
+        <choice value="image" />
+      </choices>
+      <default>"color"</default>
+      <summary>Fill type</summary>
+      <description
+            >What fills the banner where the image does not cover it: a plain color, or a blurred copy of the image itself</description>
+    </key>
+
     <key name="fill-color" type="s">
       <default>""</default>
       <summary>Fill color</summary>

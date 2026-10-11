@@ -4,6 +4,7 @@ import St from "gi://St";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Clutter from "gi://Clutter";
+import GdkPixbuf from "gi://GdkPixbuf";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import * as PanelMenu from "resource:///org/gnome/shell/ui/panelMenu.js";
 import { Extension } from "resource:///org/gnome/shell/extensions/extension.js";
@@ -29,6 +30,97 @@ function cssUrl(path) {
   return path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+// ---- Blurred fill (TikTok style): small cached blurred copy of an image ----
+const BLUR_SMALL_WIDTH = 32; // smaller = blurrier
+const _blurPending = new Map(); // out path -> Set of callbacks
+const _blurFailed = new Set();
+
+function _blurDir() {
+  return GLib.build_filenamev([GLib.get_user_cache_dir(), "panel-image"]);
+}
+
+function _makeBlur(src, out, done) {
+  Gio.File.new_for_path(src).read_async(GLib.PRIORITY_LOW, null, (f, res) => {
+    let stream;
+    try {
+      stream = f.read_finish(res);
+    } catch (_e) {
+      done(false);
+      return;
+    }
+    // decode straight to a tiny size (in a thread), then smooth it back up
+    GdkPixbuf.Pixbuf.new_from_stream_at_scale_async(
+      stream,
+      BLUR_SMALL_WIDTH,
+      -1,
+      true,
+      null,
+      (_p, res2) => {
+        let ok = false;
+        try {
+          let pb = GdkPixbuf.Pixbuf.new_from_stream_finish(res2);
+          for (let i = 0; i < 3; i++)
+            pb = pb.scale_simple(
+              pb.get_width() * 2,
+              pb.get_height() * 2,
+              GdkPixbuf.InterpType.BILINEAR,
+            );
+          GLib.mkdir_with_parents(_blurDir(), 0o755);
+          pb.savev(out, "png", [], []);
+          ok = true;
+        } catch (e) {
+          log(`panel-image: blur failed for ${src}: ${e.message}`);
+        }
+        try {
+          stream.close(null);
+        } catch (_e) {
+          // ignore
+        }
+        done(ok);
+      },
+    );
+  });
+}
+
+// Returns the blurred file path if ready, else null (and calls onReady later)
+function getBlurred(path, onReady) {
+  let info;
+  try {
+    info = Gio.File.new_for_path(path).query_info(
+      "time::modified,standard::size",
+      Gio.FileQueryInfoFlags.NONE,
+      null,
+    );
+  } catch (_e) {
+    return null;
+  }
+
+  const key = `${path}|${info.get_attribute_uint64("time::modified")}|${info.get_size()}`;
+  const out = GLib.build_filenamev([
+    _blurDir(),
+    `blur-${GLib.compute_checksum_for_string(GLib.ChecksumType.MD5, key, -1)}.png`,
+  ]);
+
+  if (GLib.file_test(out, GLib.FileTest.EXISTS)) return out;
+  if (_blurFailed.has(out)) return null;
+
+  let waiting = _blurPending.get(out);
+  if (waiting) {
+    if (onReady) waiting.add(onReady);
+    return null;
+  }
+
+  waiting = new Set();
+  if (onReady) waiting.add(onReady);
+  _blurPending.set(out, waiting);
+  _makeBlur(path, out, (ok) => {
+    _blurPending.delete(out);
+    if (!ok) _blurFailed.add(out);
+    waiting.forEach((cb) => cb());
+  });
+  return null;
+}
+
 // Image banner widget
 const ImageBanner = GObject.registerClass(
   class ImageBanner extends St.Button {
@@ -48,6 +140,11 @@ const ImageBanner = GObject.registerClass(
       this._placeholderPath = placeholderPath;
       this._onOpenPrefs = onOpenPrefs;
       this._marginStyle = "";
+      this._currentPath = null;
+      this._destroyed = false;
+      this._blurCb = () => {
+        if (!this._destroyed) this._applyFrameStyle();
+      };
       this._currentImageIndex = 0;
       this._hoverImages = [];
 
@@ -93,7 +190,21 @@ const ImageBanner = GObject.registerClass(
         this._settings.get_string("border-color") || "rgba(255,255,255,0.25)";
 
       let css = `${this._marginStyle} border-radius: ${radius}px;`;
-      if (fill) css += ` background-color: ${fill};`;
+
+      // Fill: blurred copy of the current image, or a plain color
+      let blurred = null;
+      if (
+        this._settings.get_string("fill-mode") === "image" &&
+        this._currentPath
+      )
+        blurred = getBlurred(this._currentPath, this._blurCb);
+      if (blurred)
+        css +=
+          ` background-image: url("${cssUrl(blurred)}");` +
+          " background-size: 100% 100%; background-repeat: no-repeat;" +
+          " background-position: center;";
+      else if (fill) css += ` background-color: ${fill};`;
+
       if (borderWidth > 0)
         css += ` border: ${borderWidth}px solid ${borderColor};`;
       this._setStyle(this, css);
@@ -171,6 +282,10 @@ const ImageBanner = GObject.registerClass(
 
       this._hoverImages = all;
 
+      // warm up the blurred fills so hover switching has no delay
+      if (this._settings.get_string("fill-mode") === "image")
+        all.forEach((p) => getBlurred(p, this._blurCb));
+
       // Connect motion event for hover tracking
       this._motionEventId = this.connect("motion-event", (actor, event) => {
         return this._onMotionEvent(actor, event);
@@ -216,17 +331,22 @@ const ImageBanner = GObject.registerClass(
       const file = Gio.File.new_for_path(imagePath);
 
       if (file.query_exists(null)) {
+        this._currentPath = imagePath;
+        this._applyFrameStyle();
         this._container.child = null;
         this._setStyle(this._container, this._buildStyle(imagePath));
       }
     }
 
     _updateImage() {
+      const imagePath = this._getImages()[0];
+      const ok =
+        !!imagePath && Gio.File.new_for_path(imagePath).query_exists(null);
+
+      this._currentPath = ok ? imagePath : null;
       this._applyFrameStyle();
 
-      const imagePath = this._getImages()[0];
-
-      if (imagePath && Gio.File.new_for_path(imagePath).query_exists(null)) {
+      if (ok) {
         this._container.child = null;
         this._setStyle(this._container, this._buildStyle(imagePath));
         return;
@@ -278,6 +398,7 @@ const ImageBanner = GObject.registerClass(
     }
 
     destroy() {
+      this._destroyed = true;
       if (this._motionEventId) {
         this.disconnect(this._motionEventId);
         this._motionEventId = null;

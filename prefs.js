@@ -131,6 +131,128 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       return row;
     };
 
+    // icon chooser: preview button + popover with searchable symbolic icons
+    const DEFAULT_ICON = "image-x-generic-symbolic";
+    const buildIconRow = () => {
+      const row = new Adw.ActionRow({ title: "Icon" });
+      const preview = new Gtk.Image({ pixel_size: 24 });
+
+      const popover = new Gtk.Popover();
+      const box = new Gtk.Box({
+        orientation: Gtk.Orientation.VERTICAL,
+        spacing: 8,
+        margin_top: 8,
+        margin_bottom: 8,
+        margin_start: 8,
+        margin_end: 8,
+      });
+      const search = new Gtk.SearchEntry({ placeholder_text: "Search icons" });
+      box.append(search);
+
+      let query = "";
+      const theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default());
+      const names = theme
+        .get_icon_names()
+        .filter((n) => n.endsWith("-symbolic"))
+        .sort();
+      const filter = new Gtk.CustomFilter();
+      filter.set_filter_func(
+        (item) => !query || item.get_string().includes(query),
+      );
+      const filtered = Gtk.FilterListModel.new(
+        Gtk.StringList.new(names),
+        filter,
+      );
+
+      const factory = new Gtk.SignalListItemFactory();
+      factory.connect("setup", (_f, item) => {
+        item.set_child(
+          new Gtk.Image({
+            pixel_size: 24,
+            margin_top: 8,
+            margin_bottom: 8,
+            margin_start: 8,
+            margin_end: 8,
+          }),
+        );
+      });
+      factory.connect("bind", (_f, item) => {
+        const name = item.get_item().get_string();
+        const img = item.get_child();
+        img.icon_name = name;
+        img.tooltip_text = name;
+      });
+
+      const grid = new Gtk.GridView({
+        model: Gtk.NoSelection.new(filtered),
+        factory,
+        single_click_activate: true,
+        min_columns: 5,
+        max_columns: 10,
+      });
+      grid.connect("activate", (_g, pos) => {
+        settings.set_string(
+          "panel-button-icon",
+          filtered.get_item(pos).get_string(),
+        );
+        popover.popdown();
+      });
+      search.connect("search-changed", () => {
+        query = search.get_text().trim().toLowerCase();
+        filter.changed(Gtk.FilterChange.DIFFERENT);
+      });
+      box.append(
+        new Gtk.ScrolledWindow({
+          child: grid,
+          min_content_width: 380,
+          min_content_height: 320,
+          hscrollbar_policy: Gtk.PolicyType.NEVER,
+        }),
+      );
+
+      const fileBtn = new Gtk.Button({ label: "Use an image file…" });
+      fileBtn.connect("clicked", () => {
+        popover.popdown();
+        chooseFile("Choose icon", true, (p) =>
+          settings.set_string("panel-button-icon", p),
+        );
+      });
+      const resetBtn = new Gtk.Button({ label: "Reset" });
+      resetBtn.connect("clicked", () => {
+        settings.set_string("panel-button-icon", DEFAULT_ICON);
+        popover.popdown();
+      });
+      const btnBox = new Gtk.Box({
+        orientation: Gtk.Orientation.HORIZONTAL,
+        spacing: 8,
+        homogeneous: true,
+      });
+      btnBox.append(fileBtn);
+      btnBox.append(resetBtn);
+      box.append(btnBox);
+
+      popover.set_child(box);
+      popover.connect("show", () => search.grab_focus());
+
+      const menuBtn = new Gtk.MenuButton({ valign: Gtk.Align.CENTER, popover });
+      menuBtn.set_child(preview);
+      row.add_suffix(menuBtn);
+      row.activatable_widget = menuBtn;
+
+      const sync = () => {
+        const v = settings.get_string("panel-button-icon") || DEFAULT_ICON;
+        try {
+          preview.gicon = Gio.icon_new_for_string(v);
+        } catch (_e) {
+          preview.icon_name = "image-missing";
+        }
+        row.subtitle = v.startsWith("/") ? GLib.path_get_basename(v) : v;
+      };
+      settings.connect("changed::panel-button-icon", sync);
+      sync();
+      return row;
+    };
+
     // ---------- Display ----------
 
     const displayGroup = new Adw.PreferencesGroup({ title: "Display" });
@@ -317,7 +439,29 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       "Colors",
       "Fill shows where the image is narrower than the banner",
     );
-    colorExp.add_row(colorRow("Fill color", "fill-color"));
+    const fillModes = ["color", "image"];
+    const fillModeRow = new Adw.ComboRow({
+      title: "Fill",
+      subtitle: "Image = blurred copy of the image itself (TikTok style)",
+    });
+    const fillModel = new Gtk.StringList();
+    ["Color", "Image (blurred)"].forEach((s) => fillModel.append(s));
+    fillModeRow.set_model(fillModel);
+    fillModeRow.set_selected(
+      Math.max(0, fillModes.indexOf(settings.get_string("fill-mode"))),
+    );
+    fillModeRow.connect("notify::selected", () => {
+      settings.set_string("fill-mode", fillModes[fillModeRow.get_selected()]);
+    });
+    colorExp.add_row(fillModeRow);
+
+    const fillColorRow = colorRow("Fill color", "fill-color");
+    colorExp.add_row(fillColorRow);
+    const syncFill = () => {
+      fillColorRow.sensitive = settings.get_string("fill-mode") === "color";
+    };
+    settings.connect("changed::fill-mode", syncFill);
+    syncFill();
     colorExp.add_row(colorRow("Border color", "border-color"));
     colorExp.add_row(
       spinRow("Border width", "0 = no border", "border-width", 0, 20, 2),
@@ -347,20 +491,19 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
 
     // Panel button
     const btnExp = expander("Panel Button", "Standalone mode only");
-    const iconRow = new Adw.EntryRow({ title: "Icon name or image" });
-    settings.bind(
-      "panel-button-icon",
-      iconRow,
-      "text",
-      Gio.SettingsBindFlags.DEFAULT,
-    );
-    iconRow.add_suffix(
-      pickButton("Pick an image as icon", () =>
-        chooseFile("Choose icon", true, (p) =>
-          settings.set_string("panel-button-icon", p),
-        ),
-      ),
-    );
+    let iconRow;
+    try {
+      iconRow = buildIconRow();
+    } catch (e) {
+      log(`panel-image: icon chooser failed, using text field: ${e.message}`);
+      iconRow = new Adw.EntryRow({ title: "Icon name or image" });
+      settings.bind(
+        "panel-button-icon",
+        iconRow,
+        "text",
+        Gio.SettingsBindFlags.DEFAULT,
+      );
+    }
     btnExp.add_row(iconRow);
 
     const sides = ["left", "center", "right"];
