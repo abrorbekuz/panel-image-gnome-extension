@@ -26,10 +26,11 @@ fi
 
 ZIP_FILE="${UUID_PROD}.zip"
 
-rm "${ZIP_FILE}"
+rm -f "${ZIP_FILE}"
 
 echo "Packaging extension into ${ZIP_FILE}..."
 
 zip -r "${ZIP_FILE}" . -x "assets/*" -x ".git/*" -x ".gitignore" -x ".project" -x "README.md" -x "Changelog.md" -x "package.sh" -x "*.zip"
+zip "${ZIP_FILE}" assets/placeholder.svg
 
 echo "Successfully created ${ZIP_FILE}"

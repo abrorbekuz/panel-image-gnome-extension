@@ -622,7 +622,7 @@ export default class ImageQuickSettingsExtension extends Extension {
     else icon.icon_name = iconStr || "image-x-generic-symbolic";
     button.add_child(icon);
 
-    button.connect("event", (_actor, event) => {
+    this._buttonEventId = button.connect("event", (_actor, event) => {
       const type = event.type();
       if (
         type === Clutter.EventType.BUTTON_PRESS ||
@@ -640,7 +640,9 @@ export default class ImageQuickSettingsExtension extends Extension {
 
     this._floating = new ImageBanner(this._settings, this._bannerOptions(true));
     this._floating.hide();
-    this._floating.connect("clicked", () => this._closeFloating());
+    this._floatingClickedId = this._floating.connect("clicked", () =>
+      this._closeFloating(),
+    );
     Main.layoutManager.addTopChrome(this._floating);
   }
 
@@ -692,11 +694,19 @@ export default class ImageQuickSettingsExtension extends Extension {
   _removeStandalone() {
     this._closeFloating();
     if (this._floating) {
+      if (this._floatingClickedId) {
+        this._floating.disconnect(this._floatingClickedId);
+        this._floatingClickedId = null;
+      }
       Main.layoutManager.removeChrome(this._floating);
       this._floating.destroy();
       this._floating = null;
     }
     if (this._panelButton) {
+      if (this._buttonEventId) {
+        this._panelButton.disconnect(this._buttonEventId);
+        this._buttonEventId = null;
+      }
       this._panelButton.destroy();
       this._panelButton = null;
     }
