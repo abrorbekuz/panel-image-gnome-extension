@@ -126,17 +126,34 @@ const ImageBanner = GObject.registerClass(
   class ImageBanner extends St.Button {
     _init(
       settings,
-      { standalone = false, placeholderPath = null, onOpenPrefs = null } = {},
+      {
+        standalone = false,
+        detached = false,
+        placeholderPath = null,
+        onOpenPrefs = null,
+      } = {},
     ) {
+      // Standalone lives directly in top chrome where nothing allocates it,
+      // so give it an explicit frame (see _applyFrameStyle) and don't let it
+      // expand/fill; inside Quick Settings it fills the menu width instead.
+      const layout = standalone
+        ? {
+            x_expand: false,
+            y_expand: false,
+            x_align: Clutter.ActorAlign.START,
+            y_align: Clutter.ActorAlign.START,
+          }
+        : { x_expand: true, x_align: Clutter.ActorAlign.FILL };
+
       super._init({
         style_class: "image-banner",
         can_focus: true,
-        x_expand: true,
-        x_align: Clutter.ActorAlign.FILL,
+        ...layout,
       });
 
       this._settings = settings;
       this._standalone = standalone;
+      this._detached = detached;
       this._placeholderPath = placeholderPath;
       this._onOpenPrefs = onOpenPrefs;
       this._marginStyle = "";
@@ -191,6 +208,12 @@ const ImageBanner = GObject.registerClass(
 
       let css = `${this._marginStyle} border-radius: ${radius}px;`;
 
+      // Standalone: the frame spans the screen and the image sits centered in
+      // it, so the fill (color or blurred image) shows on both sides.
+      // CSS width excludes the border, so subtract it.
+      if (this._standalone)
+        css += ` width: ${Math.max(0, this._screenWidth() - 2 * borderWidth)}px;`;
+
       // Fill: blurred copy of the current image, or a plain color
       let blurred = null;
       if (
@@ -220,6 +243,23 @@ const ImageBanner = GObject.registerClass(
       return Math.max(1, Math.min(r, half));
     }
 
+    // Monitor width in CSS px (the shell scales CSS px by the scale factor)
+    _screenWidth() {
+      const monitor = Main.layoutManager.primaryMonitor;
+      const sf = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+      return Math.floor(monitor.width / sf);
+    }
+
+    // Radius of the image itself. In detached mode the image sits inside a
+    // padded, bordered frame, so shrink it to keep the corners concentric.
+    _innerRadius() {
+      const r = this._radius();
+      if (!this._detached) return r;
+      const bw = this._settings.get_int("border-width");
+      const inset = 2 /* css padding */ + (bw > 0 ? bw : 1); /* css border */
+      return Math.max(1, r - inset);
+    }
+
     // Only touch the style if it really changed (less redraw churn)
     _setStyle(actor, css) {
       if (actor.style !== css) actor.style = css;
@@ -237,14 +277,11 @@ const ImageBanner = GObject.registerClass(
     _buildStyle(imagePath) {
       const height = this._settings.get_int("image-height");
       let width = this._settings.get_int("image-width");
-      const radius = this._radius();
+      const radius = this._innerRadius();
 
       if (this._standalone) {
-        // -1 (or too big) = screen width. CSS px are scaled by the shell,
-        // so divide the monitor width by the scale factor.
-        const monitor = Main.layoutManager.primaryMonitor;
-        const sf = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const screenW = Math.floor(monitor.width / sf);
+        // -1 (or too big) = screen width
+        const screenW = this._screenWidth();
         width = width > 0 ? Math.min(width, screenW) : screenW;
       }
 
@@ -476,7 +513,10 @@ export default class ImageQuickSettingsExtension extends Extension {
     const gap = this._settings.get_int("gap");
 
     // Create banner
-    this._banner = new ImageBanner(this._settings, this._bannerOptions(false));
+    this._banner = new ImageBanner(this._settings, {
+      ...this._bannerOptions(false),
+      detached,
+    });
 
     // Store original style classes
     this._originalBoxStyle = QuickSettingsBox.style_class;
