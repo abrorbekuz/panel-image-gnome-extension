@@ -423,20 +423,26 @@ const ImageBanner = GObject.registerClass(
 
       this._setStyle(this._container, this._buildStyle(imagePath));
 
-      if (
-        !animate ||
-        !oldPath ||
-        oldPath === imagePath ||
-        !oldStyle ||
-        w < 1 ||
-        h < 1 ||
-        !St.Settings.get().enable_animations
-      )
+      if (!animate || oldPath === imagePath) return;
+
+      const why = !oldPath
+        ? "no previous image"
+        : !oldStyle
+          ? "no previous style"
+          : w < 1 || h < 1
+            ? `banner has no size (${w}x${h})`
+            : !St.Settings.get().enable_animations
+              ? "system animations are turned off"
+              : null;
+      if (why) {
+        log(`panel-image: no transition, ${why}`);
         return;
+      }
 
       const name = this._settings.get_string("transition-effect");
       if (name === "none") return;
       const effect = TRANSITIONS[name] ?? TRANSITIONS[DEFAULT_TRANSITION];
+      log(`panel-image: running "${name}" on ${w}x${h}`);
 
       const ctx = {
         overlay: this._overlay,
