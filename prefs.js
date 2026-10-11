@@ -1,4 +1,3 @@
-// prefs.js
 import Adw from "gi://Adw";
 import Gtk from "gi://Gtk";
 import Gio from "gi://Gio";
@@ -17,8 +16,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
     const page = new Adw.PreferencesPage();
     window.add(page);
 
-    // ---------- helpers ----------
-
     const imageFilters = () => {
       const filter = new Gtk.FileFilter({ name: "Images" });
       filter.add_mime_type("image/*");
@@ -27,7 +24,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       return [store, filter];
     };
 
-    // pick many images
     const chooseImages = (onPick) => {
       const dialog = new Gtk.FileDialog({
         title: "Choose images",
@@ -43,13 +39,10 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
           for (let i = 0; i < files.get_n_items(); i++)
             paths.push(files.get_item(i).get_path());
           onPick(paths);
-        } catch (_e) {
-          // cancelled
-        }
+        } catch (_e) {}
       });
     };
 
-    // pick one file (icon / script)
     const chooseFile = (title, imagesOnly, onPick) => {
       const dialog = new Gtk.FileDialog({ title, modal: true });
       if (imagesOnly) {
@@ -61,9 +54,7 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
         try {
           const file = d.open_finish(res);
           if (file) onPick(file.get_path());
-        } catch (_e) {
-          // cancelled
-        }
+        } catch (_e) {}
       });
     };
 
@@ -93,7 +84,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       return row;
     };
 
-    // color picker with reset (empty = theme default)
     const colorRow = (title, key) => {
       const row = new Adw.ActionRow({ title });
       const btn = new Gtk.ColorDialogButton({
@@ -132,7 +122,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       return row;
     };
 
-    // icon chooser: preview button + popover with searchable symbolic icons
     const DEFAULT_ICON = "image-x-generic-symbolic";
     const buildIconRow = () => {
       const row = new Adw.ActionRow({ title: "Icon" });
@@ -254,8 +243,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       return row;
     };
 
-    // ---------- Display ----------
-
     const displayGroup = new Adw.PreferencesGroup({ title: "Display" });
     page.add(displayGroup);
 
@@ -328,8 +315,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
     settings.connect("changed::hover-images-enabled", syncTransition);
     syncTransition();
 
-    // ---------- Images (drag & drop) ----------
-
     const imagesGroup = new Adw.PreferencesGroup({
       title: "Images",
       description:
@@ -364,7 +349,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
 
     addBtn.connect("clicked", () => chooseImages(addPaths));
 
-    // drop target on the whole window
     const drop = Gtk.DropTarget.new(Gdk.FileList.$gtype, Gdk.DragAction.COPY);
     drop.connect("drop", (_target, value) => {
       const files = value.get_files();
@@ -434,8 +418,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
     settings.connect("changed::images", rebuildImages);
     rebuildImages();
 
-    // ---------- Collapsible options ----------
-
     const moreGroup = new Adw.PreferencesGroup({ title: "Customize" });
     page.add(moreGroup);
 
@@ -445,7 +427,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       return row;
     };
 
-    // Size & shape
     const shapeExp = expander("Size &amp; Shape", "Width, height, corners");
     shapeExp.add_row(
       spinRow(
@@ -463,7 +444,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       spinRow("Corner radius", "0 = square", "corner-radius", 0, 64, 4),
     );
 
-    // Colors
     const colorExp = expander(
       "Colors",
       "Fill shows where the image is narrower than the banner",
@@ -496,7 +476,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       spinRow("Border width", "0 = no border", "border-width", 0, 20, 2),
     );
 
-    // Quick Settings
     const qsExp = expander("Quick Settings", "Menu width and gap");
     qsExp.add_row(
       spinRow(
@@ -518,7 +497,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       ),
     );
 
-    // Panel button
     const btnExp = expander("Panel Button", "Standalone mode only");
     let iconRow;
     try {
@@ -560,7 +538,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       ),
     );
 
-    // Click action
     const scriptExp = expander(
       "Click Action",
       "Run a script on click. Top-left corner of the image opens these preferences",
@@ -581,7 +558,6 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
     );
     scriptExp.add_row(scriptRow);
 
-    // grey out what does not apply to the current mode
     const syncMode = () => {
       const standalone = settings.get_string("position") === "standalone";
       qsExp.sensitive = !standalone;

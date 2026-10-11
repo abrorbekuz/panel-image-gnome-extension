@@ -49,7 +49,8 @@
         <choice value="blinds" />
       </choices>
       <default>"crossfade"</default>
-      <summary>Transition effect</summary>
+      <summary
+            >Transition effect (teaser - next version [not works for now])</summary>
       <description
             >Animation used when the image changes on hover (none = instant switch)</description>
     </key>

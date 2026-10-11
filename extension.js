@@ -1,4 +1,3 @@
-// extension.js
 import GObject from "gi://GObject";
 import St from "gi://St";
 import Gio from "gi://Gio";
@@ -11,7 +10,6 @@ import { Extension } from "resource:///org/gnome/shell/extensions/extension.js";
 import { TRANSITIONS } from "./transitions.js";
 import { DEFAULT_TRANSITION } from "./transition-choices.js";
 
-// Get Quick Settings elements
 let QuickSettingsMenu = null;
 let QuickSettingsBox = null;
 let QuickSettingsActor = null;
@@ -25,16 +23,14 @@ function getQuickSettings() {
   }
 }
 
-// Size (px) of the invisible top-left corner that opens the preferences
 const PREFS_CORNER_SIZE = 28;
 
 function cssUrl(path) {
   return path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-// ---- Blurred fill (TikTok style): small cached blurred copy of an image ----
-const BLUR_SMALL_WIDTH = 32; // smaller = blurrier
-const _blurPending = new Map(); // out path -> Set of callbacks
+const BLUR_SMALL_WIDTH = 32;
+const _blurPending = new Map();
 const _blurFailed = new Set();
 
 function _blurDir() {
@@ -50,7 +46,6 @@ function _makeBlur(src, out, done) {
       done(false);
       return;
     }
-    // decode straight to a tiny size (in a thread), then smooth it back up
     GdkPixbuf.Pixbuf.new_from_stream_at_scale_async(
       stream,
       BLUR_SMALL_WIDTH,
@@ -75,16 +70,13 @@ function _makeBlur(src, out, done) {
         }
         try {
           stream.close(null);
-        } catch (_e) {
-          // ignore
-        }
+        } catch (_e) {}
         done(ok);
       },
     );
   });
 }
 
-// Returns the blurred file path if ready, else null (and calls onReady later)
 function getBlurred(path, onReady) {
   let info;
   try {
@@ -123,7 +115,6 @@ function getBlurred(path, onReady) {
   return null;
 }
 
-// Image banner widget
 const ImageBanner = GObject.registerClass(
   class ImageBanner extends St.Button {
     _init(
@@ -135,9 +126,6 @@ const ImageBanner = GObject.registerClass(
         onOpenPrefs = null,
       } = {},
     ) {
-      // Standalone lives directly in top chrome where nothing allocates it,
-      // so give it an explicit frame (see _applyFrameStyle) and don't let it
-      // expand/fill; inside Quick Settings it fills the menu width instead.
       const layout = standalone
         ? {
             x_expand: false,
@@ -166,16 +154,14 @@ const ImageBanner = GObject.registerClass(
       };
       this._currentImageIndex = 0;
       this._hoverImages = [];
-      this._shownPath = null; // image currently on the base layer
-      this._transition = null; // context of the running transition, if any
+      this._shownPath = null;
+      this._transition = null;
 
-      // Create container (holds the image)
       this._container = new St.Bin({
         x_expand: true,
         x_align: Clutter.ActorAlign.FILL,
       });
 
-      // Transitions draw on this layer, on top of the image (see transitions.js)
       this._overlay = new Clutter.Actor({
         x_expand: true,
         y_expand: true,
@@ -187,32 +173,26 @@ const ImageBanner = GObject.registerClass(
 
       this.set_child(this._container);
 
-      // Update image
       this._updateImage();
 
-      // Setup hover image switching
       this._setupHoverEffect();
 
-      // Click: invisible top-left corner opens preferences, rest runs script
       this.connect("clicked", () => {
         if (this._onOpenPrefs && this._inPrefsCorner()) this._onOpenPrefs();
         else this._executeScript();
       });
 
-      // Listen for settings changes
       this._settingsChangedId = this._settings.connect("changed", () => {
         this._updateImage();
         this._setupHoverEffect();
       });
     }
 
-    // Margin comes from the extension (gap), the rest from settings
     setMargin(css) {
       this._marginStyle = css;
       this._applyFrameStyle();
     }
 
-    // Outer frame: fill color, border, rounded corners
     _applyFrameStyle() {
       const radius = this._radius();
       const fill = this._settings.get_string("fill-color");
@@ -222,13 +202,9 @@ const ImageBanner = GObject.registerClass(
 
       let css = `${this._marginStyle} border-radius: ${radius}px;`;
 
-      // Standalone: the frame spans the screen and the image sits centered in
-      // it, so the fill (color or blurred image) shows on both sides.
-      // CSS width excludes the border, so subtract it.
       if (this._standalone)
         css += ` width: ${Math.max(0, this._screenWidth() - 2 * borderWidth)}px;`;
 
-      // Fill: blurred copy of the current image, or a plain color
       let blurred = null;
       if (
         this._settings.get_string("fill-mode") === "image" &&
@@ -247,9 +223,6 @@ const ImageBanner = GObject.registerClass(
       this._setStyle(this, css);
     }
 
-    // Corner radius from settings. Never plain 0 (1px looks square but keeps
-    // St on the same render path as rounded corners), and never more than
-    // half the banner height (bigger radius breaks the corner drawing).
     _radius() {
       const r = this._settings.get_int("corner-radius");
       const h = this._settings.get_int("image-height");
@@ -257,29 +230,24 @@ const ImageBanner = GObject.registerClass(
       return Math.max(1, Math.min(r, half));
     }
 
-    // Monitor width in CSS px (the shell scales CSS px by the scale factor)
     _screenWidth() {
       const monitor = Main.layoutManager.primaryMonitor;
       const sf = St.ThemeContext.get_for_stage(global.stage).scale_factor;
       return Math.floor(monitor.width / sf);
     }
 
-    // Radius of the image itself. In detached mode the image sits inside a
-    // padded, bordered frame, so shrink it to keep the corners concentric.
     _innerRadius() {
       const r = this._radius();
       if (!this._detached) return r;
       const bw = this._settings.get_int("border-width");
-      const inset = 2 /* css padding */ + (bw > 0 ? bw : 1); /* css border */
+      const inset = 2 + (bw > 0 ? bw : 1);
       return Math.max(1, r - inset);
     }
 
-    // Only touch the style if it really changed (less redraw churn)
     _setStyle(actor, css) {
       if (actor.style !== css) actor.style = css;
     }
 
-    // Images list: default image first, then the others
     _getImages() {
       const list = this._settings.get_strv("images").filter((p) => p);
       if (list.length === 0) return [];
@@ -294,7 +262,6 @@ const ImageBanner = GObject.registerClass(
       const radius = this._innerRadius();
 
       if (this._standalone) {
-        // -1 (or too big) = screen width
         const screenW = this._screenWidth();
         width = width > 0 ? Math.min(width, screenW) : screenW;
       }
@@ -314,7 +281,6 @@ const ImageBanner = GObject.registerClass(
     }
 
     _setupHoverEffect() {
-      // Disconnect previous handlers
       if (this._motionEventId) {
         this.disconnect(this._motionEventId);
         this._motionEventId = null;
@@ -333,16 +299,13 @@ const ImageBanner = GObject.registerClass(
 
       this._hoverImages = all;
 
-      // warm up the blurred fills so hover switching has no delay
       if (this._settings.get_string("fill-mode") === "image")
         all.forEach((p) => getBlurred(p, this._blurCb));
 
-      // Connect motion event for hover tracking
       this._motionEventId = this.connect("motion-event", (actor, event) => {
         return this._onMotionEvent(actor, event);
       });
 
-      // Reset to default image on leave
       this._leaveEventId = this.connect("leave-event", () => {
         this._currentImageIndex = 0;
         this._updateImage(true);
@@ -354,22 +317,18 @@ const ImageBanner = GObject.registerClass(
         return Clutter.EVENT_PROPAGATE;
       }
 
-      // Get mouse position relative to the banner
       const [x, y] = event.get_coords();
       const [actorX, actorY] = actor.get_transformed_position();
       const [width, height] = actor.get_size();
 
-      // Calculate relative position (0 to 1)
       const relativeX = (x - actorX) / width;
 
-      // Determine which image to show based on horizontal position
       const imageIndex = Math.floor(relativeX * this._hoverImages.length);
       const clampedIndex = Math.max(
         0,
         Math.min(imageIndex, this._hoverImages.length - 1),
       );
 
-      // Only update if changed
       if (clampedIndex !== this._currentImageIndex) {
         this._currentImageIndex = clampedIndex;
         this._showHoverImage(this._hoverImages[clampedIndex]);
@@ -383,8 +342,6 @@ const ImageBanner = GObject.registerClass(
         this._swapImage(imagePath, true);
     }
 
-    // animate = play the chosen transition effect (hover switching);
-    // otherwise the image is replaced instantly (startup, settings changes)
     _updateImage(animate = false) {
       const imagePath = this._getImages()[0];
       const ok =
@@ -402,8 +359,6 @@ const ImageBanner = GObject.registerClass(
       this._showPlaceholder(imagePath);
     }
 
-    // Put imagePath on the base layer. With animate, the old image is kept on
-    // top as pieces and the chosen effect plays them away (transitions.js).
     _swapImage(imagePath, animate) {
       const oldPath = this._shownPath;
       const oldStyle = this._container.style;
@@ -413,12 +368,9 @@ const ImageBanner = GObject.registerClass(
       this._shownPath = imagePath;
       this._applyFrameStyle();
 
-      // the overlay is replaced by the placeholder label when there is no
-      // image, so make sure it is back in place
       if (this._container.child !== this._overlay)
         this._container.child = this._overlay;
 
-      // size of the image area, before the style change below
       const [w, h] = this._overlay.get_size();
 
       this._setStyle(this._container, this._buildStyle(imagePath));
@@ -459,7 +411,6 @@ const ImageBanner = GObject.registerClass(
       });
     }
 
-    // Stop a running transition and remove its pieces
     _cancelTransition() {
       if (this._transition) {
         this._transition.cancelled = true;
@@ -468,8 +419,6 @@ const ImageBanner = GObject.registerClass(
       this._overlay.destroy_all_children();
     }
 
-    // No image (or file missing): show our placeholder image.
-    // Text only if the placeholder file itself is missing.
     _showPlaceholder(missingPath) {
       const ph = this._placeholderPath;
 
@@ -489,7 +438,6 @@ const ImageBanner = GObject.registerClass(
       });
     }
 
-    // Is the pointer in the invisible top-left corner of the banner?
     _inPrefsCorner() {
       const [px, py] = global.get_pointer();
       const [ax, ay] = this.get_transformed_position();
@@ -513,7 +461,6 @@ const ImageBanner = GObject.registerClass(
 
     destroy() {
       this._destroyed = true;
-      // the actors are destroyed with the banner; just stop effect callbacks
       if (this._transition) {
         this._transition.cancelled = true;
         this._transition = null;
@@ -535,7 +482,6 @@ const ImageBanner = GObject.registerClass(
   },
 );
 
-// Main extension class
 export default class ImageQuickSettingsExtension extends Extension {
   enable() {
     this._settings = this.getSettings();
@@ -547,8 +493,6 @@ export default class ImageQuickSettingsExtension extends Extension {
     this._applyWidth();
     this._addStandalone();
 
-    // Listen for settings changes
-    // (image, colors, border, corners update live inside ImageBanner)
     this._settingsChangedIds = [
       this._settings.connect("changed::quick-settings-width", () =>
         this._applyWidth(),
@@ -586,7 +530,6 @@ export default class ImageQuickSettingsExtension extends Extension {
   }
 
   _addBanner() {
-    // position values: top, bottom, top-detached, bottom-detached, standalone
     const mode = this._settings.get_string("position");
     if (mode === "standalone") return;
 
@@ -594,46 +537,36 @@ export default class ImageQuickSettingsExtension extends Extension {
     const position = mode.startsWith("bottom") ? "bottom" : "top";
     const gap = this._settings.get_int("gap");
 
-    // Create banner
     this._banner = new ImageBanner(this._settings, {
       ...this._bannerOptions(false),
       detached,
     });
 
-    // Store original style classes
     this._originalBoxStyle = QuickSettingsBox.style_class;
     this._originalActorStyle = QuickSettingsActor.style_class;
 
     if (detached) {
-      // Detached mode: manipulate style classes like the reference extension
       QuickSettingsBox.style_class = "";
       QuickSettingsActor.style_class = " " + QuickSettingsActor.style_class;
 
-      // Get the first child (the actual quick settings grid)
       const quickSettingsGrid = QuickSettingsBox.first_child;
 
       if (quickSettingsGrid) {
-        // Store original grid style
         this._originalGridStyle = quickSettingsGrid.style_class;
         quickSettingsGrid.style_class =
           quickSettingsGrid.style_class + " popup-menu-content quick-settings";
 
-        // Add banner based on position
         if (position === "top") {
-          // Insert at the beginning
           QuickSettingsBox.insert_child_at_index(this._banner, 0);
           this._banner.style_class = "image-banner image-banner-detached";
           this._banner.setMargin(`margin-bottom: ${gap}px;`);
         } else {
-          // Bottom: add banner after the grid
           QuickSettingsBox.add_child(this._banner);
           this._banner.style_class = "image-banner image-banner-detached";
           this._banner.setMargin(`margin-top: ${gap}px;`);
         }
       }
     } else {
-      // Integrated mode: add directly to QuickSettingsBox (menu.box)
-      // This places it as a real child in the vertical layout, not overlapping
       if (position === "top") {
         QuickSettingsBox.insert_child_at_index(this._banner, 0);
         this._banner.setMargin(`margin-bottom: ${gap}px;`);
@@ -659,7 +592,6 @@ export default class ImageQuickSettingsExtension extends Extension {
       this._banner = null;
     }
 
-    // Restore original styles
     if (this._originalBoxStyle) {
       QuickSettingsBox.style_class = this._originalBoxStyle;
       this._originalBoxStyle = null;
@@ -679,8 +611,6 @@ export default class ImageQuickSettingsExtension extends Extension {
     }
   }
 
-  // ---- Standalone mode: panel button that opens the image on its own ----
-
   _addStandalone() {
     this._removeStandalone();
     if (this._settings.get_string("position") !== "standalone") return;
@@ -692,7 +622,6 @@ export default class ImageQuickSettingsExtension extends Extension {
     else icon.icon_name = iconStr || "image-x-generic-symbolic";
     button.add_child(icon);
 
-    // PanelMenu.Button overrides the event vfunc, so hook "event" directly
     button.connect("event", (_actor, event) => {
       const type = event.type();
       if (
@@ -726,7 +655,6 @@ export default class ImageQuickSettingsExtension extends Extension {
     this._floating.show();
     this._positionFloating();
 
-    // Close on any click outside the image / panel button
     this._outsideId = global.stage.connect("captured-event", (_a, event) => {
       if (event.type() !== Clutter.EventType.BUTTON_PRESS)
         return Clutter.EVENT_PROPAGATE;

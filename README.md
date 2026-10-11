@@ -1,6 +1,6 @@
 # Avatar-Gnome-Shell-Extension
 
-Adds top image to the top panel to execute your favourite app, it even has hover play gallery. Supports Gnome 45, 46, 47, 48, 49.
+Adds top image to the top panel to execute your favourite app, it even has hover play gallery. Supports Gnome 45, 46, 47, 48, 49, 50.
 
 Available on gnome EGO:
 
@@ -8,8 +8,21 @@ Available on gnome EGO:
 
 # Changelog
 
+### v 2.0.0
+
+- Complete redesign of settings page 
+- Added settings page opener to the top-left corner of panel image 
+- Placeholder image as default image 
+
+
 ### v 1.0.1
-- Added Hover Images
+
+- Added Hover Images 
+
+### v 1.0.0
+
+- Init 
+
 
 <br>
 
@@ -28,4 +41,3 @@ Available on gnome EGO:
 Inspired by [Avatar](https://github.com/pawelswiszcz/Avatar-Gnome-Shell-Extension)
 
 Names is [Abror](https://kachka_pachka.t.me)
-
