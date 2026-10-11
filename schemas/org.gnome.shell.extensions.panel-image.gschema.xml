@@ -55,11 +55,12 @@
       <description>Height of the banner in pixels</description>
     </key>
 
-    <key name="rounded-corners" type="b">
-      <default>true</default>
-      <summary>Rounded corners</summary>
+    <key name="corner-radius" type="i">
+      <default>16</default>
+      <range min="0" max="64" />
+      <summary>Corner radius</summary>
       <description
-            >Round the corners of the image and the banner frame</description>
+            >Corner radius in pixels for the image and the banner frame (0 = square)</description>
     </key>
 
     <key name="fill-color" type="s">
@@ -116,6 +117,14 @@
       <summary>Panel side</summary>
       <description
             >Which side of the top panel the standalone button goes to</description>
+    </key>
+
+    <key name="standalone-gap" type="i">
+      <default>8</default>
+      <range min="0" max="200" />
+      <summary>Standalone gap</summary>
+      <description
+            >Gap in pixels between the top bar and the image in standalone mode</description>
     </key>
 
     <key name="script-path" type="s">

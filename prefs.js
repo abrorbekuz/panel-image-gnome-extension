@@ -308,14 +308,9 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
     shapeExp.add_row(
       spinRow("Image height", "Pixels", "image-height", 0, 4096),
     );
-    const roundedRow = new Adw.SwitchRow({ title: "Rounded corners" });
-    settings.bind(
-      "rounded-corners",
-      roundedRow,
-      "active",
-      Gio.SettingsBindFlags.DEFAULT,
+    shapeExp.add_row(
+      spinRow("Corner radius", "0 = square", "corner-radius", 0, 64, 4),
     );
-    shapeExp.add_row(roundedRow);
 
     // Colors
     const colorExp = expander(
@@ -383,11 +378,20 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
       );
     });
     btnExp.add_row(sideRow);
+    btnExp.add_row(
+      spinRow(
+        "Gap from top bar",
+        "Pixels between the panel and the image",
+        "standalone-gap",
+        0,
+        200,
+      ),
+    );
 
     // Click action
     const scriptExp = expander(
       "Click Action",
-      "Run a script when the image is clicked",
+      "Run a script on click. Top-left corner of the image opens these preferences",
     );
     const scriptRow = new Adw.EntryRow({ title: "Script" });
     settings.bind(

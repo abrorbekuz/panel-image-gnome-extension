@@ -22,6 +22,9 @@ function getQuickSettings() {
   }
 }
 
+// Size (px) of the invisible top-left corner that opens the preferences
+const PREFS_CORNER_SIZE = 28;
+
 function cssUrl(path) {
   return path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
@@ -29,7 +32,10 @@ function cssUrl(path) {
 // Image banner widget
 const ImageBanner = GObject.registerClass(
   class ImageBanner extends St.Button {
-    _init(settings, standalone = false) {
+    _init(
+      settings,
+      { standalone = false, placeholderPath = null, onOpenPrefs = null } = {},
+    ) {
       super._init({
         style_class: "image-banner",
         can_focus: true,
@@ -39,6 +45,8 @@ const ImageBanner = GObject.registerClass(
 
       this._settings = settings;
       this._standalone = standalone;
+      this._placeholderPath = placeholderPath;
+      this._onOpenPrefs = onOpenPrefs;
       this._marginStyle = "";
       this._currentImageIndex = 0;
       this._hoverImages = [];
@@ -57,9 +65,10 @@ const ImageBanner = GObject.registerClass(
       // Setup hover image switching
       this._setupHoverEffect();
 
-      // Connect click event
+      // Click: invisible top-left corner opens preferences, rest runs script
       this.connect("clicked", () => {
-        this._executeScript();
+        if (this._onOpenPrefs && this._inPrefsCorner()) this._onOpenPrefs();
+        else this._executeScript();
       });
 
       // Listen for settings changes
@@ -77,7 +86,7 @@ const ImageBanner = GObject.registerClass(
 
     // Outer frame: fill color, border, rounded corners
     _applyFrameStyle() {
-      const radius = this._settings.get_boolean("rounded-corners") ? 16 : 0;
+      const radius = this._radius();
       const fill = this._settings.get_string("fill-color");
       const borderWidth = this._settings.get_int("border-width");
       const borderColor =
@@ -87,7 +96,22 @@ const ImageBanner = GObject.registerClass(
       if (fill) css += ` background-color: ${fill};`;
       if (borderWidth > 0)
         css += ` border: ${borderWidth}px solid ${borderColor};`;
-      this.style = css;
+      this._setStyle(this, css);
+    }
+
+    // Corner radius from settings. Never plain 0 (1px looks square but keeps
+    // St on the same render path as rounded corners), and never more than
+    // half the banner height (bigger radius breaks the corner drawing).
+    _radius() {
+      const r = this._settings.get_int("corner-radius");
+      const h = this._settings.get_int("image-height");
+      const half = Math.floor((h > 0 ? h : 100) / 2);
+      return Math.max(1, Math.min(r, half));
+    }
+
+    // Only touch the style if it really changed (less redraw churn)
+    _setStyle(actor, css) {
+      if (actor.style !== css) actor.style = css;
     }
 
     // Images list: default image first, then the others
@@ -102,7 +126,7 @@ const ImageBanner = GObject.registerClass(
     _buildStyle(imagePath) {
       const height = this._settings.get_int("image-height");
       let width = this._settings.get_int("image-width");
-      const radius = this._settings.get_boolean("rounded-corners") ? 16 : 0;
+      const radius = this._radius();
 
       if (this._standalone) {
         // -1 (or too big) = screen width. CSS px are scaled by the shell,
@@ -193,7 +217,7 @@ const ImageBanner = GObject.registerClass(
 
       if (file.query_exists(null)) {
         this._container.child = null;
-        this._container.style = this._buildStyle(imagePath);
+        this._setStyle(this._container, this._buildStyle(imagePath));
       }
     }
 
@@ -202,27 +226,42 @@ const ImageBanner = GObject.registerClass(
 
       const imagePath = this._getImages()[0];
 
-      if (!imagePath) {
-        this._container.style = "";
-        this._container.child = new St.Label({
-          text: "No image. Add one in the extension preferences.",
-          style_class: "image-placeholder",
-        });
+      if (imagePath && Gio.File.new_for_path(imagePath).query_exists(null)) {
+        this._container.child = null;
+        this._setStyle(this._container, this._buildStyle(imagePath));
         return;
       }
 
-      const file = Gio.File.new_for_path(imagePath);
+      this._showPlaceholder(imagePath);
+    }
 
-      if (file.query_exists(null)) {
+    // No image (or file missing): show our placeholder image.
+    // Text only if the placeholder file itself is missing.
+    _showPlaceholder(missingPath) {
+      const ph = this._placeholderPath;
+
+      if (ph && Gio.File.new_for_path(ph).query_exists(null)) {
         this._container.child = null;
-        this._container.style = this._buildStyle(imagePath);
-      } else {
-        this._container.style = "";
-        this._container.child = new St.Label({
-          text: "Image not found: " + imagePath,
-          style_class: "image-placeholder",
-        });
+        this._setStyle(this._container, this._buildStyle(ph));
+        return;
       }
+
+      this._container.style = "";
+      this._container.child = new St.Label({
+        text: missingPath
+          ? "Image not found: " + missingPath
+          : "No image. Add one in the extension preferences.",
+        style_class: "image-placeholder",
+      });
+    }
+
+    // Is the pointer in the invisible top-left corner of the banner?
+    _inPrefsCorner() {
+      const [px, py] = global.get_pointer();
+      const [ax, ay] = this.get_transformed_position();
+      const sf = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+      const size = PREFS_CORNER_SIZE * sf;
+      return px >= ax && px <= ax + size && py >= ay && py <= ay + size;
     }
 
     _executeScript() {
@@ -286,7 +325,18 @@ export default class ImageQuickSettingsExtension extends Extension {
       this._settings.connect("changed::panel-button-position", () =>
         this._addStandalone(),
       ),
+      this._settings.connect("changed::standalone-gap", () =>
+        this._positionFloating(),
+      ),
     ];
+  }
+
+  _bannerOptions(standalone) {
+    return {
+      standalone,
+      placeholderPath: `${this.path}/assets/placeholder.svg`,
+      onOpenPrefs: () => this.openPreferences(),
+    };
   }
 
   _applyWidth() {
@@ -305,7 +355,7 @@ export default class ImageQuickSettingsExtension extends Extension {
     const gap = this._settings.get_int("gap");
 
     // Create banner
-    this._banner = new ImageBanner(this._settings);
+    this._banner = new ImageBanner(this._settings, this._bannerOptions(false));
 
     // Store original style classes
     this._originalBoxStyle = QuickSettingsBox.style_class;
@@ -416,7 +466,7 @@ export default class ImageQuickSettingsExtension extends Extension {
     Main.panel.addToStatusArea(`${this.uuid}-button`, button, 0, side);
     this._panelButton = button;
 
-    this._floating = new ImageBanner(this._settings, true);
+    this._floating = new ImageBanner(this._settings, this._bannerOptions(true));
     this._floating.hide();
     this._floating.connect("clicked", () => this._closeFloating());
     Main.layoutManager.addTopChrome(this._floating);
@@ -430,12 +480,8 @@ export default class ImageQuickSettingsExtension extends Extension {
       return;
     }
 
-    const monitor = Main.layoutManager.primaryMonitor;
     this._floating.show();
-    const [, w] = this._floating.get_preferred_width(-1);
-    const [bx] = this._panelButton.get_transformed_position();
-    const x = Math.max(monitor.x, Math.min(bx, monitor.x + monitor.width - w));
-    this._floating.set_position(x, monitor.y + Main.panel.height);
+    this._positionFloating();
 
     // Close on any click outside the image / panel button
     this._outsideId = global.stage.connect("captured-event", (_a, event) => {
@@ -450,6 +496,18 @@ export default class ImageQuickSettingsExtension extends Extension {
         this._closeFloating();
       return Clutter.EVENT_PROPAGATE;
     });
+  }
+
+  _positionFloating() {
+    if (!this._floating || !this._floating.visible || !this._panelButton)
+      return;
+
+    const monitor = Main.layoutManager.primaryMonitor;
+    const gap = this._settings.get_int("standalone-gap");
+    const [, w] = this._floating.get_preferred_width(-1);
+    const [bx] = this._panelButton.get_transformed_position();
+    const x = Math.max(monitor.x, Math.min(bx, monitor.x + monitor.width - w));
+    this._floating.set_position(x, monitor.y + Main.panel.height + gap);
   }
 
   _closeFloating() {
