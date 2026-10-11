@@ -8,6 +8,8 @@ import GdkPixbuf from "gi://GdkPixbuf";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import * as PanelMenu from "resource:///org/gnome/shell/ui/panelMenu.js";
 import { Extension } from "resource:///org/gnome/shell/extensions/extension.js";
+import { TRANSITIONS } from "./transitions.js";
+import { DEFAULT_TRANSITION } from "./transition-choices.js";
 
 // Get Quick Settings elements
 let QuickSettingsMenu = null;
@@ -164,12 +166,24 @@ const ImageBanner = GObject.registerClass(
       };
       this._currentImageIndex = 0;
       this._hoverImages = [];
+      this._shownPath = null; // image currently on the base layer
+      this._transition = null; // context of the running transition, if any
 
       // Create container (holds the image)
       this._container = new St.Bin({
         x_expand: true,
         x_align: Clutter.ActorAlign.FILL,
       });
+
+      // Transitions draw on this layer, on top of the image (see transitions.js)
+      this._overlay = new Clutter.Actor({
+        x_expand: true,
+        y_expand: true,
+        x_align: Clutter.ActorAlign.FILL,
+        y_align: Clutter.ActorAlign.FILL,
+        clip_to_allocation: true,
+      });
+      this._container.set_child(this._overlay);
 
       this.set_child(this._container);
 
@@ -331,7 +345,7 @@ const ImageBanner = GObject.registerClass(
       // Reset to default image on leave
       this._leaveEventId = this.connect("leave-event", () => {
         this._currentImageIndex = 0;
-        this._updateImage();
+        this._updateImage(true);
       });
     }
 
@@ -365,31 +379,87 @@ const ImageBanner = GObject.registerClass(
     }
 
     _showHoverImage(imagePath) {
-      const file = Gio.File.new_for_path(imagePath);
-
-      if (file.query_exists(null)) {
-        this._currentPath = imagePath;
-        this._applyFrameStyle();
-        this._container.child = null;
-        this._setStyle(this._container, this._buildStyle(imagePath));
-      }
+      if (Gio.File.new_for_path(imagePath).query_exists(null))
+        this._swapImage(imagePath, true);
     }
 
-    _updateImage() {
+    // animate = play the chosen transition effect (hover switching);
+    // otherwise the image is replaced instantly (startup, settings changes)
+    _updateImage(animate = false) {
       const imagePath = this._getImages()[0];
       const ok =
         !!imagePath && Gio.File.new_for_path(imagePath).query_exists(null);
 
-      this._currentPath = ok ? imagePath : null;
-      this._applyFrameStyle();
-
       if (ok) {
-        this._container.child = null;
-        this._setStyle(this._container, this._buildStyle(imagePath));
+        this._swapImage(imagePath, animate);
         return;
       }
 
+      this._cancelTransition();
+      this._shownPath = null;
+      this._currentPath = null;
+      this._applyFrameStyle();
       this._showPlaceholder(imagePath);
+    }
+
+    // Put imagePath on the base layer. With animate, the old image is kept on
+    // top as pieces and the chosen effect plays them away (transitions.js).
+    _swapImage(imagePath, animate) {
+      const oldPath = this._shownPath;
+      const oldStyle = this._container.style;
+
+      this._cancelTransition();
+      this._currentPath = imagePath;
+      this._shownPath = imagePath;
+      this._applyFrameStyle();
+
+      // the overlay is replaced by the placeholder label when there is no
+      // image, so make sure it is back in place
+      if (this._container.child !== this._overlay)
+        this._container.child = this._overlay;
+
+      // size of the image area, before the style change below
+      const [w, h] = this._overlay.get_size();
+
+      this._setStyle(this._container, this._buildStyle(imagePath));
+
+      if (
+        !animate ||
+        !oldPath ||
+        oldPath === imagePath ||
+        !oldStyle ||
+        w < 1 ||
+        h < 1 ||
+        !St.Settings.get().enable_animations
+      )
+        return;
+
+      const name = this._settings.get_string("transition-effect");
+      if (name === "none") return;
+      const effect = TRANSITIONS[name] ?? TRANSITIONS[DEFAULT_TRANSITION];
+
+      const ctx = {
+        overlay: this._overlay,
+        width: Math.round(w),
+        height: Math.round(h),
+        oldStyle,
+        cancelled: false,
+      };
+      this._transition = ctx;
+      effect.run(ctx, () => {
+        if (ctx.cancelled) return;
+        this._transition = null;
+        this._overlay.destroy_all_children();
+      });
+    }
+
+    // Stop a running transition and remove its pieces
+    _cancelTransition() {
+      if (this._transition) {
+        this._transition.cancelled = true;
+        this._transition = null;
+      }
+      this._overlay.destroy_all_children();
     }
 
     // No image (or file missing): show our placeholder image.
@@ -398,7 +468,8 @@ const ImageBanner = GObject.registerClass(
       const ph = this._placeholderPath;
 
       if (ph && Gio.File.new_for_path(ph).query_exists(null)) {
-        this._container.child = null;
+        if (this._container.child !== this._overlay)
+          this._container.child = this._overlay;
         this._setStyle(this._container, this._buildStyle(ph));
         return;
       }
@@ -436,6 +507,11 @@ const ImageBanner = GObject.registerClass(
 
     destroy() {
       this._destroyed = true;
+      // the actors are destroyed with the banner; just stop effect callbacks
+      if (this._transition) {
+        this._transition.cancelled = true;
+        this._transition = null;
+      }
       if (this._motionEventId) {
         this.disconnect(this._motionEventId);
         this._motionEventId = null;

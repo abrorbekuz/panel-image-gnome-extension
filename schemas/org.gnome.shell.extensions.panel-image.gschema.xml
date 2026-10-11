@@ -40,6 +40,20 @@
             >Moving the mouse across the banner switches between the images</description>
     </key>
 
+    <key name="transition-effect" type="s">
+      <choices>
+        <choice value="none" />
+        <choice value="crossfade" />
+        <choice value="chessboard" />
+        <choice value="snap" />
+        <choice value="blinds" />
+      </choices>
+      <default>"crossfade"</default>
+      <summary>Transition effect</summary>
+      <description
+            >Animation used when the image changes on hover (none = instant switch)</description>
+    </key>
+
     <key name="image-width" type="i">
       <default>-1</default>
       <range min="-1" max="8192" />

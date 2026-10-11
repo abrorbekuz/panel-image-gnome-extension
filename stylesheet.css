@@ -14,15 +14,12 @@
     background-color: rgba(255, 255, 255, 0.1);
 }
 
-/* Detached mode: separate component styling */
 .image-banner-detached {
     background-color: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
 
     border-radius: 16px;
     padding: 2px;
-    /* no box-shadow: the popup clips it to a rectangle, which showed up as a
-       square-cornered outer shell around the rounded banner */
 }
 
 .image-banner-detached:hover {

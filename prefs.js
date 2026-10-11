@@ -5,6 +5,7 @@ import Gio from "gi://Gio";
 import Gdk from "gi://Gdk";
 import GLib from "gi://GLib";
 import { ExtensionPreferences } from "resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js";
+import { TRANSITION_CHOICES } from "./transition-choices.js";
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif|tiff?)$/i;
 
@@ -299,6 +300,34 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
     );
     displayGroup.add(hoverRow);
 
+    const transitionRow = new Adw.ComboRow({
+      title: "Transition effect",
+      subtitle: "How the image changes when you move the mouse over it",
+    });
+    const transitionModel = new Gtk.StringList();
+    TRANSITION_CHOICES.forEach(([, label]) => transitionModel.append(label));
+    transitionRow.set_model(transitionModel);
+    transitionRow.set_selected(
+      Math.max(
+        0,
+        TRANSITION_CHOICES.findIndex(
+          ([id]) => id === settings.get_string("transition-effect"),
+        ),
+      ),
+    );
+    transitionRow.connect("notify::selected", () => {
+      settings.set_string(
+        "transition-effect",
+        TRANSITION_CHOICES[transitionRow.get_selected()][0],
+      );
+    });
+    displayGroup.add(transitionRow);
+    const syncTransition = () => {
+      transitionRow.sensitive = settings.get_boolean("hover-images-enabled");
+    };
+    settings.connect("changed::hover-images-enabled", syncTransition);
+    syncTransition();
+
     // ---------- Images (drag & drop) ----------
 
     const imagesGroup = new Adw.PreferencesGroup({
@@ -417,7 +446,7 @@ export default class ImageQuickSettingsPreferences extends ExtensionPreferences 
     };
 
     // Size & shape
-    const shapeExp = expander("Size & Shape", "Width, height, corners");
+    const shapeExp = expander("Size &amp; Shape", "Width, height, corners");
     shapeExp.add_row(
       spinRow(
         "Image width",
