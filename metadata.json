@@ -3,13 +3,7 @@
   "name": "Panel Image",
   "description": "Add image into the panel. Options to change: \n * Top image (can be Your own image from system, change it via your own script) ",
   "version": 1,
-  "shell-version": [
-    "45",
-    "46",
-    "47",
-    "48",
-    "49"
-  ],
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
   "url": "https://github.com/abrorbekuz/panel-image-gnome-extension",
   "settings-schema": "org.gnome.shell.extensions.panel-image"
 }
